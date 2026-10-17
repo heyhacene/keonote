@@ -177,16 +177,46 @@ export function NoteEditorModal({
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {onShareNote && (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentObj: Note = {
+                    id: noteToEdit ? noteToEdit.id : `note-${Date.now()}`,
+                    title: title.trim() || 'Sans titre',
+                    content: content.trim(),
+                    summary: summary.trim() || undefined,
+                    todos,
+                    tags: tags.length > 0 ? tags : ['Général'],
+                    type: noteToEdit ? noteToEdit.type : 'text',
+                    audioData: noteToEdit?.audioData,
+                    audioDurationSec: noteToEdit?.audioDurationSec,
+                    isPinned: noteToEdit ? noteToEdit.isPinned : false,
+                    isArchived: noteToEdit ? noteToEdit.isArchived : false,
+                    color: noteToEdit ? noteToEdit.color : '#8b5cf6',
+                    createdAt: noteToEdit ? noteToEdit.createdAt : Date.now(),
+                    updatedAt: Date.now(),
+                  };
+                  onShareNote(currentObj);
+                }}
+                className="py-1.5 px-2.5 bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/60 dark:hover:bg-orange-900/70 text-orange-600 dark:text-amber-300 border border-orange-200/80 dark:border-orange-800/50 rounded-xl text-xs font-bold transition flex items-center gap-1"
+                title="Partager ou envoyer vers Keo Family"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Partager</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleAiEnrich}
               disabled={isAiLoading}
-              className="py-1.5 px-3 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+              className="py-1.5 px-2.5 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-900/40 rounded-xl text-xs font-bold transition flex items-center gap-1"
               title="Structurer et enrichir avec l'IA Gemini"
             >
               <Sparkles className={`w-3.5 h-3.5 text-amber-500 ${isAiLoading ? 'animate-spin' : ''}`} />
-              <span>{isAiLoading ? 'Analyse...' : 'Enrichir par IA'}</span>
+              <span>{isAiLoading ? 'IA...' : 'IA'}</span>
             </button>
 
             <button

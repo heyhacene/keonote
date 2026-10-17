@@ -104,7 +104,7 @@ export function NoteCard({
             </span>
           </div>
 
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1">
             {onShareNote && (
               <button
                 type="button"
@@ -112,10 +112,11 @@ export function NoteCard({
                   e.stopPropagation();
                   onShareNote(note);
                 }}
-                className="p-1.5 rounded-xl text-gray-400 hover:text-keo-600 dark:text-slate-400 dark:hover:text-keo-300 hover:bg-keo-50 dark:hover:bg-slate-700 transition"
+                className="px-2.5 py-1 rounded-xl bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/60 dark:hover:bg-orange-900/70 text-orange-600 dark:text-amber-300 border border-orange-200/80 dark:border-orange-800/60 text-[11px] font-bold flex items-center gap-1 transition active:scale-95"
                 title="Partager (WhatsApp, SMS, Mail, Keo Family)"
               >
                 <Share2 className="w-3.5 h-3.5" />
+                <span>Partager</span>
               </button>
             )}
 
@@ -362,24 +363,36 @@ export function NoteCard({
         )}
       </div>
 
-      {/* TAGS FOOTER */}
-      {note.tags && note.tags.length > 0 && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-gray-100 dark:border-slate-750"
-        >
-          {note.tags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              onClick={() => onTagClick(tag)}
-              className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-slate-700 hover:bg-keo-50 hover:text-keo-600 dark:hover:bg-slate-600 text-gray-600 dark:text-gray-300 transition"
-            >
-              #{tag}
-            </button>
-          ))}
+      {/* TAGS & BOUTON PARTAGE FOOTER */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center justify-between gap-2 pt-2.5 mt-1 border-t border-gray-100 dark:border-slate-700/80"
+      >
+        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+          {note.tags &&
+            note.tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => onTagClick(tag)}
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-slate-700 hover:bg-keo-50 hover:text-keo-600 dark:hover:bg-slate-600 text-gray-600 dark:text-gray-300 transition"
+              >
+                #{tag}
+              </button>
+            ))}
         </div>
-      )}
+
+        {onShareNote && (
+          <button
+            type="button"
+            onClick={() => onShareNote(note)}
+            className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-orange-500/15 to-amber-500/15 hover:from-orange-500/25 hover:to-amber-500/25 text-orange-600 dark:text-amber-300 border border-orange-300/50 dark:border-amber-600/40 text-[10px] font-extrabold flex items-center gap-1 shrink-0 transition active:scale-95"
+          >
+            <Share2 className="w-3 h-3" />
+            <span>Partager / Keo Family</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
