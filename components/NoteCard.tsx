@@ -320,9 +320,24 @@ export function NoteCard({
           </div>
         )}
 
-        {/* CONTENU TEXTE */}
-        <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-4 mb-3 whitespace-pre-line">
-          {note.content}
+        {/* CONTENU TEXTE AVEC LIENS CLIQUABLES */}
+        <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-5 mb-3 whitespace-pre-line">
+          {note.content.split(/(https?:\/\/[^\s]+)/g).map((part, idx) =>
+            /^https?:\/\//.test(part) ? (
+              <a
+                key={idx}
+                href={part}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-keo-600 dark:text-keo-400 underline font-bold break-all hover:text-keo-700"
+              >
+                {part}
+              </a>
+            ) : (
+              <React.Fragment key={idx}>{part}</React.Fragment>
+            )
+          )}
         </p>
 
         {/* LISTE DE TÂCHES INTERACTIVE */}

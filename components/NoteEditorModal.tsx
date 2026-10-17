@@ -274,6 +274,24 @@ export function NoteEditorModal({
               rows={6}
               className="w-full text-xs sm:text-sm text-gray-800 dark:text-gray-200 bg-transparent resize-none outline-none leading-relaxed"
             />
+            {Array.from(new Set(content.match(/https?:\/\/[^\s]+/g) || [])).length > 0 && (
+              <div className="mt-2 p-2.5 bg-keo-50/70 dark:bg-slate-900/80 border border-keo-200/70 dark:border-slate-700 rounded-2xl space-y-1.5">
+                <span className="text-[10px] font-bold uppercase text-keo-700 dark:text-keo-300 block">
+                  🔗 Lien(s) cliquable(s) dans cette note :
+                </span>
+                {Array.from(new Set(content.match(/https?:\/\/[^\s]+/g) || [])).map((link, i) => (
+                  <a
+                    key={i}
+                    href={link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-xs font-bold text-keo-600 dark:text-keo-400 underline break-all hover:text-keo-700"
+                  >
+                    {link}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ACTIONS / TO-DOS */}
