@@ -125,7 +125,7 @@ export function SettingsModal({
                   Paramètres & Clé IA
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-keo-100 dark:bg-keo-950/80 text-keo-700 dark:text-keo-300 font-bold border border-keo-200/50 dark:border-keo-800/50">
-                  Build 4
+                  Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || DEFAULT_KEONOTE_BUILD}
                 </span>
               </div>
               <p className="text-[11px] text-gray-400">

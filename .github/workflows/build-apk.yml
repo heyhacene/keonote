@@ -69,6 +69,11 @@ jobs:
       - name: Synchronisation Capacitor Android
         run: npx cap sync android
 
+      - name: Configuration de la version Android (versionCode & versionName)
+        run: |
+          sed -i 's/versionCode 1/versionCode ${{ github.run_number }}/g' android/app/build.gradle
+          sed -i 's/versionName "1.0"/versionName "1.0.${{ github.run_number }}"/g' android/app/build.gradle
+
       - name: Compilation et Signature de l'APK Android
         working-directory: android
         env:
@@ -93,23 +98,40 @@ jobs:
             UNSIGNED_APK="aligned.apk"
           fi
 
+          KEYSTORE_PATH="../keystore/keonote.keystore"
           if [ -n "$SIGNING_KEY" ]; then
             echo "🔑 Signature avec le secret de dépôt GitHub..."
             echo "$SIGNING_KEY" | base64 -d > release.keystore
+            KEYSTORE_FILE="release.keystore"
             KEY_ALIAS="$ALIAS"
             STORE_PASS="$KEY_STORE_PASSWORD"
             KEY_PASS="${KEY_PASSWORD:-$KEY_STORE_PASSWORD}"
-          else
-            echo "🔑 Création automatique d'un trousseau Keo Note officiel..."
-            keytool -genkeypair -v -keystore release.keystore -alias keonote -keyalg RSA -keysize 2048 -validity 10000 -storepass keonotepassword -keypass keonotepassword -dname "CN=KeoNote, OU=Apps, O=Otsmane, L=Paris, S=France, C=FR"
+          elif [ -f "$KEYSTORE_PATH" ]; then
+            echo "🔑 Réutilisation du trousseau officiel permanent Keo Note..."
+            KEYSTORE_FILE="$KEYSTORE_PATH"
             KEY_ALIAS="keonote"
             STORE_PASS="keonotepassword"
             KEY_PASS="keonotepassword"
+          else
+            echo "🔑 Génération initiale du trousseau officiel permanent Keo Note..."
+            mkdir -p ../keystore
+            keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -alias keonote -keyalg RSA -keysize 2048 -validity 10000 -storepass keonotepassword -keypass keonotepassword -dname "CN=KeoNote, OU=Apps, O=Otsmane, L=Paris, S=France, C=FR"
+            KEYSTORE_FILE="$KEYSTORE_PATH"
+            KEY_ALIAS="keonote"
+            STORE_PASS="keonotepassword"
+            KEY_PASS="keonotepassword"
+
+            echo "📦 Enregistrement du trousseau permanent dans le dépôt GitHub..."
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$KEYSTORE_PATH"
+            git commit -m "chore: persist Keo Note signing keystore [skip ci]" || true
+            git push origin main || true
           fi
 
           echo "✍️ Signature cryptographique apksigner..."
           $APKSIGNER sign \
-            --ks release.keystore \
+            --ks "$KEYSTORE_FILE" \
             --ks-key-alias "$KEY_ALIAS" \
             --ks-pass "pass:$STORE_PASS" \
             --key-pass "pass:$KEY_PASS" \
