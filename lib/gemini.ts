@@ -1,14 +1,161 @@
 import { Note, GeminiStructureResult } from '@/types/note';
 
 /**
- * Appel à l'API gratuite Gemini 1.5 Flash ou 2.0 Flash
+ * Modèles candidats ordonnés par priorité (les plus récents en premier)
+ */
+const CANDIDATE_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-exp',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-pro',
+];
+
+let cachedWorkingModel: string | null = null;
+
+/**
+ * Découvre ou sélectionne le modèle Gemini Flash actif pour cette clé API
+ */
+export async function getActiveGeminiModel(apiKey: string): Promise<string> {
+  if (cachedWorkingModel) return cachedWorkingModel;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        const availableNames: string[] = data.models
+          .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+          .map((m: any) => m.name.replace(/^models\//, ''));
+
+        for (const candidate of CANDIDATE_MODELS) {
+          const match = availableNames.find((n) => n === candidate || n.startsWith(candidate));
+          if (match) {
+            cachedWorkingModel = match;
+            return match;
+          }
+        }
+
+        const anyFlash = availableNames.find((n) => n.includes('flash'));
+        if (anyFlash) {
+          cachedWorkingModel = anyFlash;
+          return anyFlash;
+        }
+
+        if (availableNames.length > 0) {
+          cachedWorkingModel = availableNames[0];
+          return availableNames[0];
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Impossible de lister les modèles, utilisation de la liste de secours');
+  }
+
+  return 'gemini-2.5-flash';
+}
+
+/**
+ * Exécute un appel à Gemini avec basculement automatique sur les modèles compatibles
+ */
+export async function callGeminiApi(
+  apiKey: string,
+  prompt: string,
+  responseJson: boolean = false
+): Promise<{ text: string; modelUsed: string; error?: string }> {
+  const primaryModel = await getActiveGeminiModel(apiKey);
+  const modelsToTry = [
+    primaryModel,
+    ...CANDIDATE_MODELS.filter((m) => m !== primaryModel),
+  ];
+
+  let lastError = '';
+
+  for (const model of modelsToTry) {
+    try {
+      const bodyPayload: any = {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+        },
+      };
+
+      if (responseJson) {
+        bodyPayload.generationConfig.responseMimeType = 'application/json';
+      }
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyPayload),
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          cachedWorkingModel = model;
+          return { text, modelUsed: model };
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        lastError = errJson.error?.message || `Erreur API (${res.status})`;
+        // Si le modèle n'existe pas (404), on essaye le suivant dans la liste
+        if (res.status === 404) {
+          continue;
+        }
+        return { text: '', modelUsed: model, error: lastError };
+      }
+    } catch (err: any) {
+      lastError = err.message || 'Erreur réseau';
+    }
+  }
+
+  return { text: '', modelUsed: '', error: lastError || 'Aucun modèle compatible trouvé.' };
+}
+
+/**
+ * Teste la validité de la clé API Gemini
+ */
+export async function testGeminiApiKey(
+  apiKey: string
+): Promise<{ success: boolean; message: string; modelUsed?: string }> {
+  if (!apiKey.trim()) {
+    return { success: false, message: 'Veuillez renseigner une clé API avant de tester.' };
+  }
+
+  const { text, modelUsed, error } = await callGeminiApi(
+    apiKey,
+    'Réponds exactement "OK" en un seul mot.'
+  );
+
+  if (text) {
+    return {
+      success: true,
+      message: `Succès : Clé Gemini valide ! (Modèle actif : ${modelUsed}) 🎉`,
+      modelUsed,
+    };
+  }
+
+  return {
+    success: false,
+    message: error || 'Impossible de joindre Gemini avec cette clé.',
+  };
+}
+
+/**
+ * Analyse et structure une transcription avec Gemini
  */
 export async function analyzeTranscriptWithGemini(
   transcript: string,
   apiKey: string
 ): Promise<GeminiStructureResult> {
   if (!apiKey.trim()) {
-    // Mode hors-ligne / fallback intelligent si aucune clé n'est encore configurée
     return fallbackStructure(transcript);
   }
 
@@ -33,32 +180,13 @@ Règles :
 - Réponds UNIQUEMENT le JSON valide.`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            responseMimeType: 'application/json',
-          },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      console.warn('Gemini API Error, utilisation du fallback:', errData);
+    const { text, error } = await callGeminiApi(apiKey, prompt, true);
+    if (!text || error) {
+      console.warn('Gemini call failed, fallback used:', error);
       return fallbackStructure(transcript);
     }
 
-    const data = await res.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!rawText) return fallbackStructure(transcript);
-
-    const parsed = JSON.parse(rawText);
+    const parsed = JSON.parse(text);
     return {
       title: parsed.title || 'Mémo vocal',
       summary: parsed.summary || transcript.slice(0, 80) + '...',
@@ -67,7 +195,7 @@ Règles :
       tags: Array.isArray(parsed.tags) ? parsed.tags : ['Mémo'],
     };
   } catch (err) {
-    console.warn('Erreur appel Gemini:', err);
+    console.warn('Erreur JSON ou appel Gemini:', err);
     return fallbackStructure(transcript);
   }
 }
@@ -89,7 +217,6 @@ export async function querySecondBrain(
   }
 
   if (!apiKey.trim()) {
-    // Recherche locale par mots clés si pas d'API Gemini
     const qLower = question.toLowerCase();
     const matches = activeNotes.filter(
       (n) =>
@@ -101,23 +228,26 @@ export async function querySecondBrain(
 
     if (matches.length > 0) {
       return {
-        answer: `J'ai trouvé ${matches.length} note(s) correspondant à votre recherche :\n` +
+        answer:
+          `J'ai trouvé ${matches.length} note(s) correspondant à votre recherche :\n` +
           matches.map((m) => `• **${m.title}** : ${m.summary || m.content.slice(0, 100)}`).join('\n\n') +
-          `\n\n*(Ajoutez une clé API Gemini gratuite dans les Paramètres pour obtenir des réponses synthétiques en langage naturel !)*`,
+          `\n\n*(Ajoutez une clé API Gemini gratuite dans les Paramètres pour obtenir des réponses rédigées en langage naturel !)*`,
         relatedNoteIds: matches.map((m) => m.id),
       };
     }
 
     return {
-      answer: "Aucune note ne semble correspondre directement à ces mots-clés. Ajoutez une clé API Gemini gratuite dans les Paramètres pour une compréhension intelligente de vos notes !",
+      answer:
+        "Aucune note ne semble correspondre directement à ces mots-clés. Ajoutez une clé API Gemini gratuite dans les Paramètres pour une compréhension intelligente de vos notes !",
       relatedNoteIds: [],
     };
   }
 
-  // Préparation du contexte des notes
-  const notesContext = activeNotes.map((n, idx) => {
-    return `[Note ID: ${n.id} | Titre: "${n.title}" | Tags: ${n.tags.join(', ')}]\nContenu: ${n.content}\nRésumé: ${n.summary || ''}\nTâches: ${n.todos.map((t) => (t.completed ? '[x] ' : '[ ] ') + t.text).join('; ')}\n`;
-  }).join('\n---\n');
+  const notesContext = activeNotes
+    .map((n) => {
+      return `[Note ID: ${n.id} | Titre: "${n.title}" | Tags: ${n.tags.join(', ')}]\nContenu: ${n.content}\nRésumé: ${n.summary || ''}\nTâches: ${n.todos.map((t) => (t.completed ? '[x] ' : '[ ] ') + t.text).join('; ')}\n`;
+    })
+    .join('\n---\n');
 
   const prompt = `Tu es le "Second Cerveau" de l'utilisateur dans l'application Keo Note.
 Voici toutes les notes actuelles de l'utilisateur :
@@ -132,28 +262,14 @@ Indique clairement quelle note contient l'information.
 RELATED_IDS: id1, id2 (les identifiants des notes dont tu t'es servi, ou NONE).`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-          },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      throw new Error(`Erreur API Gemini: ${res.status}`);
+    const { text, error } = await callGeminiApi(apiKey, prompt, false);
+    if (!text || error) {
+      return {
+        answer: `Impossible d'interroger Gemini pour le moment : ${error || 'Erreur réseau'}.`,
+        relatedNoteIds: [],
+      };
     }
 
-    const data = await res.json();
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    // Extraction des IDs de notes reliées
     let answer = text;
     const relatedNoteIds: string[] = [];
     const match = text.match(/RELATED_IDS:\s*(.+)$/i);
@@ -183,10 +299,20 @@ function fallbackStructure(transcript: string): GeminiStructureResult {
   const words = transcript.trim().split(/\s+/);
   const title = words.slice(0, 5).join(' ') + (words.length > 5 ? '...' : '');
 
-  // Détection basique de to-dos si phrases avec verbes d'action
   const sentences = transcript.split(/[.?!]\s+|\n+/).filter((s) => s.trim().length > 0);
   const todos: string[] = [];
-  const actionKeywords = ['penser à', 'acheter', 'rappeler', 'appeler', 'envoyer', 'faire', 'prendre', 'commander', 'payer', 'vérifier'];
+  const actionKeywords = [
+    'penser à',
+    'acheter',
+    'rappeler',
+    'appeler',
+    'envoyer',
+    'faire',
+    'prendre',
+    'commander',
+    'payer',
+    'vérifier',
+  ];
 
   sentences.forEach((sentence) => {
     const sLower = sentence.toLowerCase();

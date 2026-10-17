@@ -15,6 +15,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { getGeminiApiKey, saveGeminiApiKey } from '@/lib/storage';
+import { testGeminiApiKey } from '@/lib/gemini';
 import { getDirectKeoNoteApkUrl, getDirectKeoNoteApkFilename, fetchLatestKeoNoteApk, LatestApkRelease } from '@/lib/apkUpdate';
 import { Note } from '@/types/note';
 
@@ -60,22 +61,8 @@ export function SettingsModal({
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Dis simplement "Clé API valide !" en français.' }] }],
-          }),
-        }
-      );
-      if (res.ok) {
-        setTestResult('Succès : Votre clé Gemini fonctionne parfaitement ! 🎉');
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setTestResult(`Erreur API (${res.status}) : ${err.error?.message || 'Clé non reconnue'}`);
-      }
+      const res = await testGeminiApiKey(apiKey);
+      setTestResult(res.message);
     } catch (e: any) {
       setTestResult(`Erreur de connexion : ${e.message}`);
     } finally {
