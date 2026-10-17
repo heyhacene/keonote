@@ -235,6 +235,11 @@ export async function callGeminiApi(
   if (saved) {
     const res = await tryGenerateContent(cleanKey, saved, prompt, responseJson);
     if (res.text) return { text: res.text };
+
+    // Tentative de rattrapage après 800ms
+    await new Promise((r) => setTimeout(r, 800));
+    const retry = await tryGenerateContent(cleanKey, saved, prompt, responseJson);
+    if (retry.text) return { text: retry.text };
   }
 
   // 2. Parcourir les candidats en secours
@@ -373,7 +378,7 @@ Réponds STRICTEMENT sous forme d'un objet JSON valide ayant cette structure :
     const { text, error } = await callGeminiApi(apiKey, prompt, true);
     if (!text || error) {
       return {
-        answer: `Impossible d'interroger Gemini pour le moment : ${error || 'Erreur réseau'}.`,
+        answer: "Impossible d'interroger le Second Cerveau pour le moment. Réessayez dans quelques instants.",
         relatedNoteIds: [],
       };
     }
@@ -381,7 +386,7 @@ Réponds STRICTEMENT sous forme d'un objet JSON valide ayant cette structure :
     return cleanSecondBrainResponse(text, activeNotes);
   } catch (err: any) {
     return {
-      answer: `Impossible d'interroger Gemini pour le moment : ${err.message || 'Erreur réseau'}.`,
+      answer: "Impossible d'interroger le Second Cerveau pour le moment. Réessayez dans quelques instants.",
       relatedNoteIds: [],
     };
   }

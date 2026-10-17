@@ -132,7 +132,7 @@ export function SecondBrainModal({
         {
           id: `ai-err-${Date.now()}`,
           sender: 'assistant',
-          text: "Désolé, une erreur est survenue lors de l'interrogation de vos notes.",
+          text: "Impossible d'interroger le Second Cerveau pour le moment. Réessayez dans quelques instants.",
         },
       ]);
     } finally {

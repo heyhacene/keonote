@@ -10,6 +10,7 @@ import {
   Check,
   AlertCircle,
   Volume2,
+  ShieldCheck,
 } from 'lucide-react';
 import { VoiceRecordingManager } from '@/lib/audioRecorder';
 import { analyzeTranscriptWithGemini } from '@/lib/gemini';
@@ -39,7 +40,21 @@ export function VoiceRecordModal({
 
   useEffect(() => {
     if (isOpen) {
-      handleStartRecording();
+      setErrorMsg(null);
+      setTranscript('');
+      setDuration(0);
+
+      // Si l'autorisation a déjà été accordée précédemment, on peut lancer directement
+      if (typeof navigator !== 'undefined' && navigator.permissions?.query) {
+        navigator.permissions
+          .query({ name: 'microphone' as any })
+          .then((perm) => {
+            if (perm.state === 'granted') {
+              handleStartRecording();
+            }
+          })
+          .catch(() => {});
+      }
     } else {
       handleCleanup();
     }
@@ -69,21 +84,27 @@ export function VoiceRecordModal({
     const manager = new VoiceRecordingManager();
     recorderRef.current = manager;
 
-    const started = await manager.start(
-      (liveText) => setTranscript(liveText),
-      (bars) => setWaveformData(bars)
-    );
+    try {
+      const started = await manager.start(
+        (liveText) => setTranscript(liveText),
+        (bars) => setWaveformData(bars)
+      );
 
-    if (!started) {
-      setErrorMsg('Impossible d’accéder au microphone. Veuillez autoriser l’accès micro.');
+      if (!started) {
+        setErrorMsg('Microphone non autorisé. Cliquez sur le bouton ci-dessous pour autoriser l’accès au micro.');
+        setIsRecording(false);
+        return;
+      }
+
+      setIsRecording(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = setInterval(() => {
+        setDuration((prev) => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      setErrorMsg('Impossible d’activer le microphone. Vérifiez les autorisations de votre téléphone.');
       setIsRecording(false);
-      return;
     }
-
-    setIsRecording(true);
-    timerRef.current = setInterval(() => {
-      setDuration((prev) => prev + 1);
-    }, 1000);
   };
 
   const handleStopAndAnalyze = async () => {
@@ -148,10 +169,28 @@ export function VoiceRecordModal({
         {/* HEADER MODAL */}
         <div className="w-full flex items-center justify-between pb-3 border-b border-gray-100 dark:border-slate-700">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-            <span className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider">
-              {isRecording ? 'Enregistrement en direct' : isAnalyzing ? 'Structuration IA...' : 'Mémo vocal'}
-            </span>
+            {isRecording ? (
+              <>
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider">
+                  Enregistrement en direct
+                </span>
+              </>
+            ) : isAnalyzing ? (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider">
+                  Structuration IA...
+                </span>
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4 text-keo-600 dark:text-keo-400" />
+                <span className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider">
+                  Mémo vocal & Dictée
+                </span>
+              </>
+            )}
           </div>
           <button
             type="button"
@@ -162,83 +201,130 @@ export function VoiceRecordModal({
           </button>
         </div>
 
-        {/* COMPTEUR & VISUALISATION AUDIO */}
-        <div className="my-6 flex flex-col items-center">
-          <div className="text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white font-mono mb-4">
-            {formatSeconds(duration)}
-          </div>
-
-          {/* ONDE SONORE DYNAMIQUE */}
-          <div className="flex items-center gap-1.5 h-16 px-4 py-2 bg-gray-50 dark:bg-slate-900 rounded-2xl border border-gray-150 dark:border-slate-700/80">
-            {waveformData.map((amplitude, i) => (
-              <div
-                key={i}
-                className="w-2 rounded-full bg-gradient-to-t from-keo-600 to-amber-400 transition-all duration-75"
-                style={{
-                  height: `${isRecording ? Math.max(12, amplitude) : 12}%`,
-                }}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* TRANSCRIPTION EN DIRECT */}
-        <div className="w-full bg-gray-50 dark:bg-slate-900/90 rounded-2xl p-4 border border-gray-150 dark:border-slate-700 min-h-[110px] max-h-[160px] overflow-y-auto mb-6">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-400 mb-1 flex items-center gap-1">
-            <Volume2 className="w-3 h-3 text-keo-500" />
-            <span>Retranscription en temps réel :</span>
-          </div>
-          {transcript ? (
-            <p className="text-sm font-medium text-gray-800 dark:text-gray-100 leading-relaxed">
-              {transcript}
+        {/* ÉTAT 1 : EN ATTENTE D'AUTORISATION OU DÉMARRAGE */}
+        {!isRecording && !isAnalyzing && (
+          <div className="my-8 flex flex-col items-center text-center max-w-sm w-full">
+            <button
+              type="button"
+              onClick={handleStartRecording}
+              className="w-24 h-24 rounded-full bg-gradient-to-tr from-keo-600 via-purple-600 to-amber-400 text-white flex items-center justify-center shadow-xl shadow-keo-600/30 hover:scale-105 active:scale-95 transition group"
+            >
+              <Mic className="w-10 h-10 group-hover:scale-110 transition-transform" />
+            </button>
+            <h4 className="mt-4 font-extrabold text-base text-gray-900 dark:text-white">
+              Appuyer pour parler
+            </h4>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5 leading-relaxed">
+              Active le microphone de votre téléphone et transcrit vos paroles en temps réel.
             </p>
-          ) : (
-            <p className="text-xs text-gray-400 italic">
-              Parlez naturellement en français... Vos paroles s’affichent ici en direct.
-            </p>
-          )}
-        </div>
 
-        {/* MESSAGE D'ERREUR */}
-        {errorMsg && (
-          <div className="w-full mb-4 p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 rounded-xl text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorMsg}</span>
+            {errorMsg && (
+              <div className="mt-5 p-3.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl text-left space-y-2 w-full">
+                <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-500" />
+                  <span>Autorisation microphone requise</span>
+                </div>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                  Keo Note a besoin de l’accès au micro pour retranscrire votre voix.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleStartRecording}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs active:scale-98 transition flex items-center justify-center gap-1.5"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>Autoriser le microphone</span>
+                </button>
+                <p className="text-[10px] text-gray-400">
+                  Si le popup n'apparaît pas : Paramètres du téléphone &gt; Applications &gt; Keo Note &gt; Autorisations.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ACTIONS & CONTRÔLE */}
-        <div className="w-full flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={handleStartRecording}
-            disabled={isAnalyzing}
-            className="p-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 rounded-2xl transition flex items-center justify-center gap-1.5 text-xs font-bold disabled:opacity-50"
-            title="Recommencer l'enregistrement"
-          >
-            <RotateCcw className="w-4 h-4" />
-            <span className="hidden sm:inline">Recommencer</span>
-          </button>
+        {/* ÉTAT 2 : ENREGISTREMENT ACTIF */}
+        {isRecording && (
+          <>
+            {/* COMPTEUR & VISUALISATION AUDIO */}
+            <div className="my-6 flex flex-col items-center">
+              <div className="text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white font-mono mb-4">
+                {formatSeconds(duration)}
+              </div>
 
-          <button
-            type="button"
-            onClick={handleStopAndAnalyze}
-            disabled={isAnalyzing || duration === 0}
-            className="flex-1 py-3.5 px-4 bg-gradient-to-r from-keo-600 to-purple-600 hover:from-keo-700 hover:to-purple-700 text-white rounded-2xl text-xs sm:text-sm font-extrabold transition flex items-center justify-center gap-2 shadow-lg shadow-keo-600/30 active:scale-98 disabled:opacity-50"
-          >
-            {isAnalyzing ? (
-              <>
-                <Sparkles className="w-4 h-4 animate-spin text-amber-300" />
-                <span>Structuration IA en cours...</span>
-              </>
-            ) : (
-              <>
+              {/* ONDE SONORE DYNAMIQUE */}
+              <div className="flex items-center gap-1.5 h-16 px-4 py-2 bg-gray-50 dark:bg-slate-900 rounded-2xl border border-gray-150 dark:border-slate-700/80">
+                {waveformData.map((amplitude, i) => (
+                  <div
+                    key={i}
+                    className="w-2 rounded-full bg-gradient-to-t from-keo-600 to-amber-400 transition-all duration-75"
+                    style={{
+                      height: `${Math.max(12, amplitude)}%`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* TRANSCRIPTION EN DIRECT */}
+            <div className="w-full bg-gray-50 dark:bg-slate-900/90 rounded-2xl p-4 border border-gray-150 dark:border-slate-700 min-h-[110px] max-h-[160px] overflow-y-auto mb-6">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-400 mb-1 flex items-center gap-1">
+                <Volume2 className="w-3 h-3 text-keo-500" />
+                <span>Retranscription en temps réel :</span>
+              </div>
+              {transcript ? (
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-100 leading-relaxed">
+                  {transcript}
+                </p>
+              ) : (
+                <p className="text-xs text-gray-400 italic">
+                  Parlez naturellement en français... Vos paroles s’affichent ici en direct.
+                </p>
+              )}
+            </div>
+
+            {/* ACTIONS & CONTRÔLE */}
+            <div className="w-full flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={handleStartRecording}
+                disabled={isAnalyzing}
+                className="p-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 rounded-2xl transition flex items-center justify-center gap-1.5 text-xs font-bold disabled:opacity-50"
+                title="Recommencer l'enregistrement"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span className="hidden sm:inline">Recommencer</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStopAndAnalyze}
+                disabled={isAnalyzing || duration === 0}
+                className="flex-1 py-3.5 px-4 bg-gradient-to-r from-keo-600 to-purple-600 hover:from-keo-700 hover:to-purple-700 text-white rounded-2xl text-xs sm:text-sm font-extrabold transition flex items-center justify-center gap-2 shadow-lg shadow-keo-600/30 active:scale-98 disabled:opacity-50"
+              >
                 <Sparkles className="w-4 h-4 text-amber-300" />
                 <span>Terminer & Structurer avec l'IA</span>
-              </>
-            )}
-          </button>
-        </div>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ÉTAT 3 : ANALYSE EN COURS */}
+        {isAnalyzing && (
+          <div className="my-10 flex flex-col items-center text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-keo-50 dark:bg-slate-900 flex items-center justify-center text-keo-600 dark:text-keo-400 shadow-inner">
+              <Sparkles className="w-8 h-8 animate-spin text-amber-400" />
+            </div>
+            <div>
+              <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">
+                Structuration intelligente en cours...
+              </h4>
+              <p className="text-xs text-gray-400 mt-1 max-w-xs">
+                Gemini extrait le titre, le résumé, vos to-dos et les catégories.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

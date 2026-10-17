@@ -69,6 +69,16 @@ jobs:
       - name: Synchronisation Capacitor Android
         run: npx cap sync android
 
+      - name: Configuration des permissions Android (Microphone & Audio)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          echo "Injection des permissions RECORD_AUDIO et MODIFY_AUDIO_SETTINGS dans $MANIFEST..."
+          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST"; then
+            sed -i '/<application/i \    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />' "$MANIFEST"
+          fi
+          echo "Permissions Android actives :"
+          grep -i "uses-permission" "$MANIFEST" || true
+
       - name: Configuration de la version Android (versionCode & versionName)
         run: |
           sed -i 's/versionCode 1/versionCode ${{ github.run_number }}/g' android/app/build.gradle
