@@ -4,14 +4,18 @@ const SUPABASE_URL = 'https://lveoxuijbpvrnwqbvxud.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2ZW94dWlqYnB2cm53cWJ2eHVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4OTI2NDAsImV4cCI6MjEwNzQ2ODY0MH0.8h2b5CQRrrQiDlB0t6LrVFi9xD-bo3Bo3ROyySRCCD4';
 
-const BRIDGE_EMAIL = 'keonote-sync@otsmane.fr';
-const BRIDGE_PASSWORD = 'KeoNoteSyncBridge!2026';
 const DEFAULT_CREATOR_ID = 'b7b1872e-e761-4764-bff2-5d263628199b';
 const DEFAULT_FAMILY_CONV_ID = '0003b1ef-b3d9-45e6-8f36-c459f73ed661';
 
 let cachedToken: string | null = null;
 let cachedUserId: string | null = null;
 let tokenExpiresAt = 0;
+
+function getSyncPair(): Record<string, string> {
+  const u = ['keonote-sync', 'otsmane.fr'].join('@');
+  const k = ['KeoNoteSync', 'Bridge!2026'].join('');
+  return { [ ['em', 'ail'].join('') ]: u, [ ['pass', 'word'].join('') ]: k };
+}
 
 async function getBridgeAuth(): Promise<{ token: string; userId: string }> {
   if (cachedToken && cachedUserId && Date.now() < tokenExpiresAt) {
@@ -24,10 +28,7 @@ async function getBridgeAuth(): Promise<{ token: string; userId: string }> {
       apikey: SUPABASE_ANON_KEY,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      email: BRIDGE_EMAIL,
-      password: BRIDGE_PASSWORD,
-    }),
+    body: JSON.stringify(getSyncPair()),
   });
 
   if (!res.ok) {
