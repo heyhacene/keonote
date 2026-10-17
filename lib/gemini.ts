@@ -237,34 +237,88 @@ export async function callGeminiApi(
   responseJson: boolean = false
 ): Promise<{ text: string; error?: string }> {
   const cleanKey = apiKey.trim();
-  if (!cleanKey) return { text: '', error: 'Clé absente' };
+  if (!cleanKey) return { text: '', error: 'Clé API Gemini absente. Ajoutez-la dans Paramètres ⚙️.' };
+
+  let lastError = '';
+
+  // Helper qui tente avec responseJson puis sans responseJson si l'endpoint rejette responseMimeType
+  const tryEndpointWithFallback = async (ep: WorkingEndpoint) => {
+    const res = await tryGenerateContent(cleanKey, ep, promptOrParts, responseJson);
+    if (res.text) return res;
+    if (responseJson && (res.status === 400 || res.status === 404)) {
+      const resPlain = await tryGenerateContent(cleanKey, ep, promptOrParts, false);
+      if (resPlain.text) return resPlain;
+    }
+    return res;
+  };
 
   // 1. Essayer d'abord le dernier endpoint fonctionnel mémorisé
   const saved = getSavedWorkingEndpoint();
   if (saved) {
-    const res = await tryGenerateContent(cleanKey, saved, promptOrParts, responseJson);
+    const res = await tryEndpointWithFallback(saved);
     if (res.text) return { text: res.text };
+    if (res.error) lastError = `${saved.model}: ${res.error}`;
 
-    // Tentative de rattrapage après 800ms
-    await new Promise((r) => setTimeout(r, 800));
-    const retry = await tryGenerateContent(cleanKey, saved, promptOrParts, responseJson);
+    // Tentative de rattrapage après 600ms
+    await new Promise((r) => setTimeout(r, 600));
+    const retry = await tryEndpointWithFallback(saved);
     if (retry.text) return { text: retry.text };
   }
 
-  // 2. Parcourir les candidats en secours
-  for (const cand of CANDIDATE_ENDPOINTS) {
-    const res = await tryGenerateContent(cleanKey, cand, promptOrParts, responseJson);
+  // 2. Découvrir dynamiquement les modèles du compte si les candidats statiques échouent ou d'emblée
+  const modelsBeta = await discoverModelsFromGoogle(cleanKey, 'v1beta');
+  const modelsV1 = await discoverModelsFromGoogle(cleanKey, 'v1');
+  const allDiscovered = prioritizeModels(Array.from(new Set([...modelsBeta, ...modelsV1])));
+
+  const dynamicEndpoints: WorkingEndpoint[] = allDiscovered.slice(0, 6).map((m) => ({
+    apiVersion: modelsBeta.includes(m) ? 'v1beta' : 'v1',
+    model: m,
+  }));
+
+  const allCandidates = [...dynamicEndpoints, ...CANDIDATE_ENDPOINTS];
+  const seen = new Set<string>();
+
+  for (const cand of allCandidates) {
+    const key = `${cand.apiVersion}/${cand.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const res = await tryEndpointWithFallback(cand);
     if (res.text) {
       saveWorkingEndpoint(cand);
       return { text: res.text };
     }
+    if (res.error) lastError = `${cand.model}: ${res.error}`;
   }
 
-  return { text: '', error: 'Impossible de contacter l’API Gemini avec cette clé.' };
+  return {
+    text: '',
+    error: lastError || 'Impossible de contacter l’API Gemini avec cette clé.',
+  };
 }
 
 /**
- * Analyse et structure un mémo vocal avec Gemini (écoute directe de l'audio si présent)
+ * Nettoie une chaîne JSON potentiellement entourée de balises markdown ```json ... ```
+ */
+function parseGeminiJson(rawText: string): any {
+  const stripped = rawText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    return JSON.parse(stripped);
+  } catch (_) {
+    const jsonMatch = stripped.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    throw new Error('Réponse IA non structurée');
+  }
+}
+
+/**
+ * Analyse et structure un mémo vocal avec Gemini (écoute directe de l'audio + transcription)
  */
 export async function analyzeVoiceMemoWithGemini(
   audioDataUrl: string | undefined,
@@ -272,48 +326,69 @@ export async function analyzeVoiceMemoWithGemini(
   apiKey: string
 ): Promise<GeminiStructureResult> {
   if (!apiKey.trim()) {
-    return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+    if (liveTranscript && liveTranscript.trim().length > 0) {
+      return fallbackStructure(liveTranscript);
+    }
+    throw new Error(
+      'Clé API Gemini non configurée. Ouvrez les Paramètres (⚙️) en haut à droite pour enregistrer votre clé API Gemini.'
+    );
   }
 
   let audioPart: GeminiContentPart | null = null;
   if (audioDataUrl && audioDataUrl.includes('base64,')) {
-    const [header, base64Data] = audioDataUrl.split(';base64,');
-    let mime = header.replace(/^data:/, '').split(';')[0] || 'audio/webm';
-    if (mime.includes('webm')) mime = 'audio/webm';
-    else if (mime.includes('mp4')) mime = 'audio/mp4';
-    else if (mime.includes('ogg')) mime = 'audio/ogg';
-    else if (mime.includes('wav')) mime = 'audio/wav';
-    else if (mime.includes('aac')) mime = 'audio/aac';
+    const [header, base64Data] = audioDataUrl.split('base64,');
+    const cleanBase64 = base64Data ? base64Data.replace(/\s/g, '') : '';
+    const hLower = header.toLowerCase();
 
-    if (base64Data && base64Data.length > 50) {
+    let mime = 'audio/webm';
+    if (hLower.includes('webm')) mime = 'audio/webm';
+    else if (hLower.includes('mp4') || hLower.includes('m4a') || hLower.includes('aac')) mime = 'audio/mp4';
+    else if (hLower.includes('ogg') || hLower.includes('opus')) mime = 'audio/ogg';
+    else if (hLower.includes('wav')) mime = 'audio/wav';
+    else if (hLower.includes('mpeg') || hLower.includes('mp3')) mime = 'audio/mp3';
+
+    if (cleanBase64 && cleanBase64.length > 50) {
       audioPart = {
         inlineData: {
           mimeType: mime,
-          data: base64Data,
+          data: cleanBase64,
         },
       };
     }
   }
 
-  const promptText = `Tu es l'assistant d'un carnet de notes personnel intelligent nommé "Keo Note".
-L'utilisateur vient d'enregistrer un mémo vocal.
-${audioPart ? "Écoute attentivement l'enregistrement audio vocal ci-joint en français et transcris avec exactitude tout ce que l'utilisateur a prononcé." : ""}
-${liveTranscript && liveTranscript.trim() ? `Transcription de référence : """${liveTranscript}"""` : ""}
+  if (!audioPart && (!liveTranscript || !liveTranscript.trim())) {
+    throw new Error('Aucun signal audio ni texte détecté dans cet enregistrement.');
+  }
 
-Analyse et structure ce mémo vocal en renvoyant STRICTEMENT un objet JSON (sans balises markdown supplémentaires) ayant exactement ce schéma :
-{
-  "title": "Un titre court et percutant en français (3 à 6 mots maximum)",
-  "summary": "Un résumé clair et synthétique en français (1 ou 2 phrases)",
-  "cleanContent": "L'intégralité du texte retranscrit et corrigé avec une ponctuation soignée",
-  "todos": ["Action concrète 1 à faire", "Action concrète 2 à faire"],
-  "tags": ["Courses", "Maison", "Travail"]
+  const promptText = `Tu es l'assistant intelligent de prise de notes "Keo Note".
+L'utilisateur vient d'enregistrer une note vocale en français.
+${
+  audioPart
+    ? "1. ÉCOUTE ATTENTIVEMENT l'enregistrement audio joint et retranscris INTÉGRALEMENT et FIDÈLEMENT tout ce qui est dit en français (en corrigeant uniquement les hésitations orales et la ponctuation pour en faire une note écrite propre et lisible)."
+    : ''
+}
+${
+  liveTranscript && liveTranscript.trim()
+    ? `Indice de reconnaissance vocale en direct : """${liveTranscript}"""`
+    : ''
 }
 
-Règles impératives :
-- Transcris fidèlement la voix de l'utilisateur dans "cleanContent". S'il n'y a absolument aucune voix audible ou seulement du silence, indique "Mémo vocal sans parole détectée".
-- Si le mémo contient des actions ou des tâches à faire, liste-les dans le tableau "todos". Sinon, laisse le tableau "todos" vide [].
-- "tags" doit contenir entre 1 et 3 catégories courtes en français (ex: Maison, Famille, Courses, Auto, Travail, Santé, Idée, Finances, Rendez-vous).
-- Réponds UNIQUEMENT le JSON valide.`;
+2. À partir de ce que dit l'utilisateur, génère :
+- "title" : Un titre clair, pertinent et précis résumant le sujet de la note (3 à 7 mots).
+- "summary" : Un résumé synthétique de l'essentiel en 1 ou 2 phrases.
+- "cleanContent" : Le texte complet de la note vocale retranscrit proprement en français, structuré en paragraphes ou points clairs si nécessaire. Ne mets JAMAIS "Mémo vocal enregistré" ! Écris les vraies paroles prononcées par l'utilisateur.
+- "todos" : La liste de toutes les actions, tâches à faire, courses ou rappels mentionnés dans la note (tableau de chaînes de caractères, ou [] s'il n'y en a pas).
+- "tags" : 1 à 3 catégories pertinentes en français (ex: Travail, Maison, Courses, Idée, Santé, Finances, Auto, Famille).
+
+Réponds UNIQUEMENT avec un objet JSON valide respectant strictement ce format :
+{
+  "title": "...",
+  "summary": "...",
+  "cleanContent": "...",
+  "todos": ["..."],
+  "tags": ["..."]
+}`;
 
   const parts: GeminiContentPart[] = [];
   if (audioPart) {
@@ -321,25 +396,29 @@ Règles impératives :
   }
   parts.push({ text: promptText });
 
-  try {
-    const { text, error } = await callGeminiApi(apiKey, parts, true);
-    if (!text || error) {
-      console.warn('Gemini audio call failed:', error);
-      return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+  const { text, error } = await callGeminiApi(apiKey, parts, true);
+  if (!text || error) {
+    if (liveTranscript && liveTranscript.trim().length > 0) {
+      return fallbackStructure(liveTranscript);
     }
+    throw new Error(error || "L'API Gemini n'a pas pu analyser l'enregistrement audio.");
+  }
 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+  try {
+    const parsed = parseGeminiJson(text);
     return {
-      title: parsed.title || 'Mémo vocal',
-      summary: parsed.summary || 'Mémo vocal enregistré',
-      cleanContent: parsed.cleanContent || liveTranscript || 'Mémo vocal enregistré',
+      title: parsed.title || 'Note vocale retranscrite',
+      summary: parsed.summary || '',
+      cleanContent: parsed.cleanContent || liveTranscript || text,
       todos: Array.isArray(parsed.todos) ? parsed.todos : [],
-      tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Mémo'],
+      tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Vocal'],
     };
   } catch (err) {
-    console.warn('Erreur JSON ou appel Gemini audio:', err);
-    return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+    // Si Gemini a répondu en texte libre au lieu de JSON, on utilise directement son texte !
+    if (text.trim().length > 0) {
+      return fallbackStructure(text.trim());
+    }
+    throw new Error('Réponse Gemini illisible. Cliquez sur Réessayer.');
   }
 }
 

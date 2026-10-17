@@ -70,11 +70,15 @@ export default function Home() {
   const handleProcessNoteInBackground = async (noteToProcess: Note) => {
     try {
       const apiKey = getGeminiApiKey();
+      const isPlaceholder =
+        !noteToProcess.content ||
+        noteToProcess.content === 'Mémo vocal enregistré' ||
+        noteToProcess.content === 'Mémo vocal enregistré...' ||
+        noteToProcess.content.startsWith('Enregistrement audio');
+
       const aiResult = await analyzeVoiceMemoWithGemini(
         noteToProcess.audioData,
-        noteToProcess.content && !noteToProcess.content.startsWith('Enregistrement audio')
-          ? noteToProcess.content
-          : '',
+        isPlaceholder ? '' : noteToProcess.content,
         apiKey
       );
 
@@ -83,7 +87,7 @@ export default function Home() {
           n.id === noteToProcess.id
             ? {
                 ...n,
-                title: aiResult.title || 'Mémo vocal',
+                title: aiResult.title || 'Note vocale retranscrite',
                 summary: aiResult.summary || '',
                 content: aiResult.cleanContent || n.content,
                 todos: aiResult.todos.map((t, idx) => ({
@@ -91,7 +95,7 @@ export default function Home() {
                   text: t,
                   completed: false,
                 })),
-                tags: aiResult.tags.length > 0 ? aiResult.tags : ['Mémo'],
+                tags: aiResult.tags.length > 0 ? aiResult.tags : ['Vocal'],
                 status: 'ready',
                 processingError: undefined,
                 updatedAt: Date.now(),
@@ -106,6 +110,10 @@ export default function Home() {
           n.id === noteToProcess.id
             ? {
                 ...n,
+                title:
+                  n.title.startsWith('Mémo vocal en cours')
+                    ? 'Mémo vocal (IA en attente)'
+                    : n.title,
                 status: 'error',
                 processingError:
                   err?.message ||
@@ -414,6 +422,7 @@ export default function Home() {
                 onEditNote={handleOpenEdit}
                 onTagClick={(t) => setSelectedTag(t)}
                 onRetryProcessing={handleRetryProcessing}
+                onOpenSettings={() => setIsSettingsOpen(true)}
               />
             ))}
           </div>

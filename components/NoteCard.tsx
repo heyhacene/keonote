@@ -28,6 +28,7 @@ interface NoteCardProps {
   onEditNote: (note: Note) => void;
   onTagClick: (tag: string) => void;
   onRetryProcessing?: (note: Note) => void;
+  onOpenSettings?: () => void;
 }
 
 export function NoteCard({
@@ -39,6 +40,7 @@ export function NoteCard({
   onEditNote,
   onTagClick,
   onRetryProcessing,
+  onOpenSettings,
 }: NoteCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -64,6 +66,11 @@ export function NoteCard({
     }
     return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
   };
+
+  const isPlaceholderContent =
+    note.content === 'Mémo vocal enregistré' ||
+    note.content === 'Mémo vocal enregistré...' ||
+    note.content.startsWith('Enregistrement audio capturé');
 
   return (
     <div
@@ -128,8 +135,21 @@ export function NoteCard({
               {showMenu && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-700 py-1.5 z-20 animate-in fade-in zoom-in-95"
+                  className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-gray-150 dark:border-slate-700 py-1.5 z-20 animate-in fade-in zoom-in-95"
                 >
+                  {note.audioData && onRetryProcessing && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMenu(false);
+                        onRetryProcessing(note);
+                      }}
+                      className="w-full px-3 py-1.5 text-xs text-left font-bold text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 flex items-center gap-2"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Retranscrire par IA</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -177,33 +197,45 @@ export function NoteCard({
             <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400 animate-spin shrink-0" />
               <span className="text-xs font-bold text-purple-900 dark:text-purple-200 truncate">
-                Structuration IA en cours...
+                Retranscription & structuration IA...
               </span>
             </div>
             <span className="text-[10px] text-purple-600 dark:text-purple-300 font-bold animate-pulse shrink-0 ml-2">
-              En arrière-plan
+              En cours
             </span>
           </div>
         )}
 
         {/* BANNIÈRE SI ERREUR DE TRAITEMENT */}
         {note.status === 'error' && (
-          <div className="mb-3 p-2.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-2xl flex items-center justify-between gap-2 text-xs">
-            <span className="text-[11px] font-medium text-red-600 dark:text-red-300 truncate">
-              {note.processingError || "Échec de structuration IA"}
-            </span>
-            {onRetryProcessing && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRetryProcessing(note);
-                }}
-                className="px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900/60 text-red-700 dark:text-red-200 rounded-lg font-bold text-[10px] shrink-0"
-              >
-                Réessayer
-              </button>
-            )}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="mb-3 p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-2xl space-y-2 text-xs"
+          >
+            <p className="text-[11px] font-medium text-red-700 dark:text-red-300 leading-snug">
+              {note.processingError || 'Échec de retranscription IA'}
+            </p>
+            <div className="flex items-center gap-2">
+              {onRetryProcessing && (
+                <button
+                  type="button"
+                  onClick={() => onRetryProcessing(note)}
+                  className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold text-[11px] flex items-center gap-1 transition"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Réessayer l'IA</span>
+                </button>
+              )}
+              {onOpenSettings && note.processingError?.toLowerCase().includes('clé') && (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-200 rounded-xl font-bold text-[11px] transition"
+                >
+                  Configurer la clé ⚙️
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -213,7 +245,7 @@ export function NoteCard({
         </h3>
 
         {/* RÉSUMÉ IA */}
-        {note.summary && (
+        {note.summary && note.summary !== 'Mémo vocal enregistré...' && (
           <div className="mb-3 p-2.5 bg-keo-50/60 dark:bg-keo-950/30 rounded-2xl border border-keo-100/80 dark:border-keo-900/30 flex items-start gap-2">
             <Sparkles className="w-3.5 h-3.5 text-keo-600 dark:text-keo-400 shrink-0 mt-0.5" />
             <p className="text-xs text-keo-900 dark:text-keo-200 font-medium leading-relaxed line-clamp-2">
@@ -242,13 +274,24 @@ export function NoteCard({
               {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
             </button>
             <div className="flex-1 text-[11px] font-medium text-gray-600 dark:text-gray-300 truncate">
-              {isPlaying ? 'Lecture en cours...' : 'Écouter l’enregistrement audio'}
+              {isPlaying ? 'Lecture en cours...' : 'Écouter l’enregistrement'}
             </div>
+            {onRetryProcessing && note.status !== 'processing' && (
+              <button
+                type="button"
+                onClick={() => onRetryProcessing(note)}
+                className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900/80 text-purple-700 dark:text-purple-300 rounded-xl text-[10px] font-bold transition flex items-center gap-1 shrink-0"
+                title="Retranscrire et structurer cet audio avec l'IA Gemini"
+              >
+                <Sparkles className="w-3 h-3 text-amber-500" />
+                <span>{isPlaceholderContent ? 'Retranscrire IA' : 'Relancer IA'}</span>
+              </button>
+            )}
           </div>
         )}
 
         {/* CONTENU TEXTE */}
-        <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-3 mb-3 whitespace-pre-line">
+        <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-4 mb-3 whitespace-pre-line">
           {note.content}
         </p>
 

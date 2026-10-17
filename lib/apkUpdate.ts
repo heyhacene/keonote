@@ -6,7 +6,7 @@ export interface LatestApkRelease {
   sizeBytes: number;
 }
 
-export const DEFAULT_KEONOTE_BUILD = process.env.NEXT_PUBLIC_BUILD_NUMBER || '9';
+export const DEFAULT_KEONOTE_BUILD = process.env.NEXT_PUBLIC_BUILD_NUMBER || '10';
 
 export function getDirectKeoNoteApkUrl(buildNumber: string = DEFAULT_KEONOTE_BUILD): string {
   return `https://github.com/heyhacene/keonote/releases/download/v1.0.0-build.${buildNumber}/KeoNote-Build-${buildNumber}.apk`;

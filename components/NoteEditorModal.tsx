@@ -14,7 +14,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { Note, NoteTodoItem } from '@/types/note';
-import { analyzeTranscriptWithGemini } from '@/lib/gemini';
+import { analyzeVoiceMemoWithGemini } from '@/lib/gemini';
 import { getGeminiApiKey } from '@/lib/storage';
 
 interface NoteEditorModalProps {
@@ -88,19 +88,30 @@ export function NoteEditorModal({
   };
 
   const handleAiEnrich = async () => {
-    if (!content.trim() && !title.trim()) {
-      setErrorMsg('Écrivez du contenu pour que l’IA puisse l’analyser.');
+    const hasAudio = Boolean(noteToEdit?.audioData);
+    if (!hasAudio && !content.trim() && !title.trim()) {
+      setErrorMsg('Écrivez du contenu ou utilisez un mémo vocal pour que l’IA puisse l’analyser.');
       return;
     }
     setIsAiLoading(true);
     setErrorMsg(null);
     try {
       const apiKey = getGeminiApiKey();
-      const textToAnalyze = `${title}\n\n${content}`;
-      const res = await analyzeTranscriptWithGemini(textToAnalyze, apiKey);
+      const isPlaceholder =
+        content === 'Mémo vocal enregistré' ||
+        content === 'Mémo vocal enregistré...' ||
+        content.startsWith('Enregistrement audio capturé');
 
-      if (!title.trim()) setTitle(res.title);
+      const textToAnalyze = isPlaceholder ? '' : `${title}\n\n${content}`.trim();
+      const res = await analyzeVoiceMemoWithGemini(
+        noteToEdit?.audioData,
+        textToAnalyze,
+        apiKey
+      );
+
+      if (res.title) setTitle(res.title);
       if (res.summary) setSummary(res.summary);
+      if (res.cleanContent) setContent(res.cleanContent);
       if (res.todos.length > 0) {
         const newItems: NoteTodoItem[] = res.todos.map((item, idx) => ({
           id: `todo-ai-${Date.now()}-${idx}`,
@@ -110,11 +121,11 @@ export function NoteEditorModal({
         setTodos([...todos, ...newItems]);
       }
       if (res.tags.length > 0) {
-        const merged = Array.from(new Set([...tags, ...res.tags]));
+        const merged = Array.from(new Set([...tags.filter((t) => t !== 'En traitement'), ...res.tags]));
         setTags(merged);
       }
     } catch (err: any) {
-      setErrorMsg('Erreur lors de l’enrichissement IA.');
+      setErrorMsg(err?.message || 'Erreur lors de la retranscription et structuration IA.');
     } finally {
       setIsAiLoading(false);
     }
