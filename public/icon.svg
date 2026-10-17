@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4c1d95"/>
+      <stop offset="50%" stop-color="#6d28d9"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="pageGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f5f3ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#2e1065" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Note sheet with shadow -->
+  <g filter="url(#shadow)">
+    <rect x="110" y="100" width="292" height="320" rx="36" fill="url(#pageGrad)"/>
+    
+    <!-- Notebook spine / decorative left strip -->
+    <rect x="110" y="100" width="38" height="320" rx="20" fill="#ede9fe"/>
+    <circle cx="129" cy="150" r="7" fill="#c4b5fd"/>
+    <circle cx="129" cy="210" r="7" fill="#c4b5fd"/>
+    <circle cx="129" cy="270" r="7" fill="#c4b5fd"/>
+    <circle cx="129" cy="330" r="7" fill="#c4b5fd"/>
+    <circle cx="129" cy="390" r="7" fill="#c4b5fd"/>
+
+    <!-- Lined note stripes -->
+    <rect x="176" y="152" width="180" height="12" rx="6" fill="#ddd6fe"/>
+    <rect x="176" y="184" width="140" height="12" rx="6" fill="#e0e7ff"/>
+    
+    <!-- Soundwave / Voice Memo Waveform in amber -->
+    <g transform="translate(168, 230)">
+      <!-- Wave bars -->
+      <rect x="10" y="28" width="10" height="24" rx="5" fill="url(#glowGrad)"/>
+      <rect x="28" y="14" width="10" height="52" rx="5" fill="url(#glowGrad)"/>
+      <rect x="46" y="4" width="10" height="72" rx="5" fill="url(#glowGrad)"/>
+      <rect x="64" y="20" width="10" height="40" rx="5" fill="url(#glowGrad)"/>
+      <rect x="82" y="2" width="10" height="76" rx="5" fill="url(#glowGrad)"/>
+      <rect x="100" y="16" width="10" height="48" rx="5" fill="url(#glowGrad)"/>
+      <rect x="118" y="26" width="10" height="28" rx="5" fill="url(#glowGrad)"/>
+    </g>
+
+    <!-- Checklist items below waveform -->
+    <g transform="translate(176, 335)">
+      <rect x="0" y="0" width="20" height="20" rx="6" fill="#7c3aed"/>
+      <path d="M5 10 L8.5 13.5 L15 7" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <rect x="30" y="4" width="130" height="12" rx="6" fill="#8b5cf6" opacity="0.8"/>
+      
+      <rect x="0" y="32" width="20" height="20" rx="6" fill="#ddd6fe"/>
+      <rect x="30" y="36" width="90" height="12" rx="6" fill="#ddd6fe"/>
+    </g>
+  </g>
+
+  <!-- AI Sparkle Star top right -->
+  <g transform="translate(365, 85)">
+    <path d="M0 28 C15 28 28 15 28 0 C28 15 41 28 56 28 C41 28 28 41 28 56 C28 41 15 28 0 28 Z" fill="url(#glowGrad)"/>
+    <circle cx="28" cy="28" r="4" fill="#ffffff"/>
+  </g>
+</svg>
