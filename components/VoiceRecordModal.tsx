@@ -161,13 +161,6 @@ export function VoiceRecordModal({
                   Enregistrement en direct
                 </span>
               </>
-            ) : isAnalyzing ? (
-              <>
-                <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-200 uppercase tracking-wider">
-                  Structuration IA...
-                </span>
-              </>
             ) : (
               <>
                 <Mic className="w-4 h-4 text-keo-600 dark:text-keo-400" />
@@ -187,7 +180,7 @@ export function VoiceRecordModal({
         </div>
 
         {/* ÉTAT 1 : EN ATTENTE D'AUTORISATION OU DÉMARRAGE */}
-        {!isRecording && !isAnalyzing && (
+        {!isRecording && (
           <div className="my-8 flex flex-col items-center text-center max-w-sm w-full">
             <button
               type="button"
@@ -273,7 +266,6 @@ export function VoiceRecordModal({
               <button
                 type="button"
                 onClick={handleStartRecording}
-                disabled={isAnalyzing}
                 className="p-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-gray-700 dark:text-gray-200 rounded-2xl transition flex items-center justify-center gap-1.5 text-xs font-bold disabled:opacity-50"
                 title="Recommencer l'enregistrement"
               >
