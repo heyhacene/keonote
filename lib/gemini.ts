@@ -76,6 +76,29 @@ async function discoverModelsFromGoogle(
 }
 
 /**
+ * Priorise les modèles : favorise les modèles rapides sans mode de réflexion (thinking)
+ */
+function prioritizeModels(models: string[]): string[] {
+  return [...models].sort((a, b) => {
+    const aThinking = a.includes('thinking') ? 1 : 0;
+    const bThinking = b.includes('thinking') ? 1 : 0;
+    if (aThinking !== bThinking) return aThinking - bThinking;
+
+    const getScore = (m: string) => {
+      if (m === 'gemini-2.0-flash') return 100;
+      if (m === 'gemini-1.5-flash') return 90;
+      if (m.includes('2.5-flash')) return 80;
+      if (m.includes('2.0-flash')) return 70;
+      if (m.includes('1.5-flash')) return 60;
+      if (m.includes('1.5-pro')) return 50;
+      if (m.includes('2.0-pro')) return 40;
+      return 10;
+    };
+    return getScore(b) - getScore(a);
+  });
+}
+
+/**
  * Exécute un appel direct generateContent sur un endpoint spécifique
  */
 async function tryGenerateContent(
@@ -109,7 +132,16 @@ async function tryGenerateContent(
 
     if (res.ok) {
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const candidate = data?.candidates?.[0];
+      const parts: any[] = candidate?.content?.parts || [];
+      // Filtrer les parties de réflexion interne (thought: true)
+      const nonThoughtParts = parts.filter((p: any) => !p.thought);
+      const usefulParts = nonThoughtParts.length > 0 ? nonThoughtParts : parts;
+      const text = usefulParts
+        .map((p: any) => (typeof p.text === 'string' ? p.text : ''))
+        .filter(Boolean)
+        .join('\n')
+        .trim();
       if (text) {
         return { text };
       }
@@ -140,10 +172,11 @@ export async function testGeminiApiKey(apiKey: string): Promise<GeminiTestResult
   const allDiscovered = Array.from(new Set([...modelsBeta, ...modelsV1]));
 
   if (allDiscovered.length > 0) {
-    diagnostics.push(`Modèles découverts sur votre compte : ${allDiscovered.slice(0, 4).join(', ')}`);
+    const prioritized = prioritizeModels(allDiscovered);
+    diagnostics.push(`Modèles découverts sur votre compte : ${prioritized.slice(0, 4).join(', ')}`);
 
-    // Tenter avec le premier modèle découvert
-    for (const m of allDiscovered) {
+    // Tenter avec les modèles dans l'ordre de priorité (flash sans thinking d'abord)
+    for (const m of prioritized) {
       const ver = modelsBeta.includes(m) ? 'v1beta' : 'v1';
       const testAttempt = await tryGenerateContent(cleanKey, { apiVersion: ver, model: m }, 'Réponds "OK"');
       if (testAttempt.text) {
@@ -154,7 +187,7 @@ export async function testGeminiApiKey(apiKey: string): Promise<GeminiTestResult
           message: `Succès : Clé validée avec le modèle ${m} (${ver}) ! 🎉`,
           modelUsed: m,
           apiVersionUsed: ver,
-          availableModels: allDiscovered,
+          availableModels: prioritized,
           diagnostics,
         };
       }
@@ -321,16 +354,23 @@ export async function querySecondBrain(
 Voici toutes les notes actuelles de l'utilisateur :
 ${notesContext}
 
-L'utilisateur te pose cette question :
+Question posée par l'utilisateur :
 "${question}"
 
-Réponds précisément, poliment et en français en t'appuyant sur ses notes.
-Indique clairement quelle note contient l'information.
-À la toute fin de ta réponse, sur une nouvelle ligne, écris exactement :
-RELATED_IDS: id1, id2 (les identifiants des notes dont tu t'es servi, ou NONE).`;
+DIRECTIVES IMPORTANTES DE FORMAT ET DE TON :
+1. Réponds directement à l'utilisateur de manière chaleureuse, soignée, précise et polie en français.
+2. Si la réponse liste des articles, des courses, des tâches ou des idées, utilise une belle liste à puces aérée avec des tirets (-) ou des puces (•).
+3. Mentionne naturellement le titre de la ou des notes sources (ex: "D'après votre note '... '").
+4. RÈGLE CRUCIALE : Ne produis AUCUN plan préliminaire, AUCUN brouillon, AUCUN monologue de réflexion, AUCUNE auto-évaluation. Tu ne dois renvoyer QUE la réponse finale.
+
+Réponds STRICTEMENT sous forme d'un objet JSON valide ayant cette structure :
+{
+  "answer": "Ta réponse complète, bienveillante et mise en forme pour l'utilisateur en français",
+  "relatedNoteIds": ["id1", "id2"]
+}`;
 
   try {
-    const { text, error } = await callGeminiApi(apiKey, prompt, false);
+    const { text, error } = await callGeminiApi(apiKey, prompt, true);
     if (!text || error) {
       return {
         answer: `Impossible d'interroger Gemini pour le moment : ${error || 'Erreur réseau'}.`,
@@ -338,26 +378,75 @@ RELATED_IDS: id1, id2 (les identifiants des notes dont tu t'es servi, ou NONE).`
       };
     }
 
-    let answer = text;
-    const relatedNoteIds: string[] = [];
-    const match = text.match(/RELATED_IDS:\s*(.+)$/i);
-    if (match) {
-      answer = text.replace(/RELATED_IDS:\s*(.+)$/i, '').trim();
-      const idsRaw = match[1].split(',').map((id) => id.trim());
-      idsRaw.forEach((id) => {
-        if (id && id !== 'NONE' && activeNotes.some((n) => n.id === id)) {
-          relatedNoteIds.push(id);
-        }
-      });
-    }
-
-    return { answer, relatedNoteIds };
+    return cleanSecondBrainResponse(text, activeNotes);
   } catch (err: any) {
     return {
       answer: `Impossible d'interroger Gemini pour le moment : ${err.message || 'Erreur réseau'}.`,
       relatedNoteIds: [],
     };
   }
+}
+
+/**
+ * Nettoie et extrait la réponse propre du Second Cerveau
+ */
+function cleanSecondBrainResponse(
+  rawText: string,
+  activeNotes: Note[]
+): { answer: string; relatedNoteIds: string[] } {
+  let cleaned = rawText.trim();
+  const relatedNoteIds: string[] = [];
+
+  // 1. Tenter d'extraire et parser le JSON
+  try {
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (typeof parsed.answer === 'string' && parsed.answer.trim()) {
+        const ids = Array.isArray(parsed.relatedNoteIds) ? parsed.relatedNoteIds : [];
+        ids.forEach((id: any) => {
+          if (typeof id === 'string' && activeNotes.some((n) => n.id === id)) {
+            if (!relatedNoteIds.includes(id)) relatedNoteIds.push(id);
+          }
+        });
+        return { answer: parsed.answer.trim(), relatedNoteIds };
+      }
+    }
+  } catch (_) {}
+
+  // 2. Si le modèle a produit une section de "Refining" ou "Réponse finale" (modèle thinking)
+  const refineMatch = cleaned.match(
+    /(?:Refining[^\n:]*|Version finale|R[ée]ponse finale)\s*:\s*([\s\S]+?)(?=\n\s*(?:RELATED_IDS|\* Precise|\* Polite|\* French|$))/i
+  );
+  if (refineMatch && refineMatch[1]?.trim().length > 10) {
+    cleaned = refineMatch[1].trim();
+  }
+
+  // 3. Extraction des RELATED_IDS si présents
+  const idMatch = cleaned.match(/RELATED_IDS:\s*(.+)$/im);
+  if (idMatch) {
+    cleaned = cleaned.replace(/RELATED_IDS:\s*(.+)$/im, '').trim();
+    const idsRaw = idMatch[1].split(',').map((id) => id.trim());
+    idsRaw.forEach((id) => {
+      if (id && id !== 'NONE' && activeNotes.some((n) => n.id === id)) {
+        if (!relatedNoteIds.includes(id)) relatedNoteIds.push(id);
+      }
+    });
+  }
+
+  // 4. Nettoyage des métadonnées, brouillons ou auto-évaluations
+  cleaned = cleaned
+    .replace(/^\s*\*\s*(?:Role|Input Data|Constraints|User Question|Relevance|Source|Items to buy|Precise\?|Polite\?|French\?|Indicate note\?|Format RELATED_IDS\?)[^\n]*\n?/gim, '')
+    .replace(/^\s*\*\s*Draft\s*\d+[^\n]*\n?/gim, '')
+    .replace(/^\s*-\s*(?:Role|Input Data|Constraints|User Question)[^\n]*\n?/gim, '')
+    .trim();
+
+  // 5. Fallback si le texte nettoyé est vide
+  if (!cleaned) {
+    cleaned = rawText.trim();
+  }
+
+  return { answer: cleaned, relatedNoteIds };
 }
 
 /**

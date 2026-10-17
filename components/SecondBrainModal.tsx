@@ -29,6 +29,53 @@ interface ChatMessage {
   relatedNotes?: Note[];
 }
 
+function FormattedAiMessage({ text }: { text: string }) {
+  const lines = text.split('\n');
+
+  return (
+    <div className="space-y-1.5 leading-relaxed">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          return <div key={idx} className="h-1" />;
+        }
+
+        const isBullet = /^[•\-\*]\s+/.test(trimmed);
+        const content = isBullet ? trimmed.replace(/^[•\-\*]\s+/, '') : trimmed;
+
+        const renderInline = (str: string) => {
+          const parts = str.split(/(\*\*[^*]+\*\*)/g);
+          return parts.map((part, pIdx) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+              return (
+                <strong key={pIdx} className="font-bold text-gray-950 dark:text-white">
+                  {part.slice(2, -2)}
+                </strong>
+              );
+            }
+            return <span key={pIdx}>{part}</span>;
+          });
+        };
+
+        if (isBullet) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1 py-0.5">
+              <span className="text-amber-500 font-bold shrink-0 mt-0.5">•</span>
+              <span className="flex-1 text-gray-800 dark:text-gray-100">{renderInline(content)}</span>
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="text-gray-800 dark:text-gray-100">
+            {renderInline(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SecondBrainModal({
   isOpen,
   notes,
@@ -146,7 +193,11 @@ export function SecondBrainModal({
                     : 'bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-100 border border-gray-150 dark:border-slate-700 rounded-bl-xs shadow-xs'
                 }`}
               >
-                <div className="whitespace-pre-wrap">{m.text}</div>
+                {m.sender === 'user' ? (
+                  <div className="whitespace-pre-wrap">{m.text}</div>
+                ) : (
+                  <FormattedAiMessage text={m.text} />
+                )}
 
                 {/* NOTES SOURCES ASSOCIÉES */}
                 {m.relatedNotes && m.relatedNotes.length > 0 && (

@@ -16,7 +16,13 @@ import {
 } from 'lucide-react';
 import { getGeminiApiKey, saveGeminiApiKey } from '@/lib/storage';
 import { testGeminiApiKey } from '@/lib/gemini';
-import { getDirectKeoNoteApkUrl, getDirectKeoNoteApkFilename, fetchLatestKeoNoteApk, LatestApkRelease } from '@/lib/apkUpdate';
+import {
+  getDirectKeoNoteApkUrl,
+  getDirectKeoNoteApkFilename,
+  fetchLatestKeoNoteApk,
+  LatestApkRelease,
+  DEFAULT_KEONOTE_BUILD,
+} from '@/lib/apkUpdate';
 import { Note } from '@/types/note';
 
 interface SettingsModalProps {
