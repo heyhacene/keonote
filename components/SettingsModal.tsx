@@ -35,6 +35,7 @@ export function SettingsModal({
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
   const [isTesting, setIsTesting] = useState(false);
   const [latestApk, setLatestApk] = useState<LatestApkRelease | null>(null);
 
@@ -43,6 +44,7 @@ export function SettingsModal({
       setApiKey(getGeminiApiKey());
       setKeySaved(false);
       setTestResult(null);
+      setDiagnostics([]);
       fetchLatestKeoNoteApk().then((apk) => setLatestApk(apk));
     }
   }, [isOpen]);
@@ -56,15 +58,19 @@ export function SettingsModal({
   const handleTestKey = async () => {
     if (!apiKey.trim()) {
       setTestResult('Veuillez renseigner une clé API avant de tester.');
+      setDiagnostics([]);
       return;
     }
     setIsTesting(true);
     setTestResult(null);
+    setDiagnostics([]);
     try {
       const res = await testGeminiApiKey(apiKey);
       setTestResult(res.message);
+      setDiagnostics(res.diagnostics || []);
     } catch (e: any) {
       setTestResult(`Erreur de connexion : ${e.message}`);
+      setDiagnostics([]);
     } finally {
       setIsTesting(false);
     }
@@ -114,9 +120,14 @@ export function SettingsModal({
               <Shield className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-gray-900 dark:text-white">
-                Paramètres & Clé IA
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                  Paramètres & Clé IA
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-keo-100 dark:bg-keo-950/80 text-keo-700 dark:text-keo-300 font-bold border border-keo-200/50 dark:border-keo-800/50">
+                  Build 4
+                </span>
+              </div>
               <p className="text-[11px] text-gray-400">
                 Configuration Gemini, Sauvegardes & Application
               </p>
@@ -195,12 +206,26 @@ export function SettingsModal({
               </div>
 
               {testResult && (
-                <div className={`p-2.5 rounded-xl text-xs mt-2 ${
-                  testResult.startsWith('Succès')
-                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                }`}>
-                  {testResult}
+                <div
+                  className={`p-3 rounded-2xl text-xs mt-2.5 space-y-1.5 ${
+                    testResult.startsWith('Succès')
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                      : 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+                  }`}
+                >
+                  <div className="font-bold">{testResult}</div>
+                  {diagnostics.length > 0 && !testResult.startsWith('Succès') && (
+                    <div className="text-[10px] opacity-80 pt-1.5 border-t border-amber-200/60 dark:border-amber-800/60 font-mono space-y-0.5 max-h-32 overflow-y-auto">
+                      <div className="font-bold uppercase tracking-wider text-[9px] mb-1">
+                        Détails des tentatives de connexion :
+                      </div>
+                      {diagnostics.map((d, i) => (
+                        <div key={i} className="truncate">
+                          • {d}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -1,151 +1,219 @@
 import { Note, GeminiStructureResult } from '@/types/note';
 
-/**
- * Modèles candidats ordonnés par priorité (les plus récents en premier)
- */
-const CANDIDATE_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-exp',
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-pro',
+interface WorkingEndpoint {
+  apiVersion: string;
+  model: string;
+}
+
+const WORKING_ENDPOINT_KEY = 'keonote_working_gemini_endpoint';
+
+const CANDIDATE_ENDPOINTS: WorkingEndpoint[] = [
+  { apiVersion: 'v1', model: 'gemini-1.5-flash' },
+  { apiVersion: 'v1beta', model: 'gemini-2.0-flash' },
+  { apiVersion: 'v1beta', model: 'gemini-2.5-flash' },
+  { apiVersion: 'v1', model: 'gemini-2.0-flash' },
+  { apiVersion: 'v1beta', model: 'gemini-2.0-flash-exp' },
+  { apiVersion: 'v1beta', model: 'gemini-1.5-flash' },
+  { apiVersion: 'v1beta', model: 'gemini-1.5-flash-latest' },
+  { apiVersion: 'v1', model: 'gemini-1.5-pro' },
+  { apiVersion: 'v1beta', model: 'gemini-1.5-pro' },
 ];
 
-let cachedWorkingModel: string | null = null;
+export interface GeminiTestResult {
+  success: boolean;
+  message: string;
+  modelUsed?: string;
+  apiVersionUsed?: string;
+  availableModels?: string[];
+  diagnostics?: string[];
+}
+
+function getSavedWorkingEndpoint(): WorkingEndpoint | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(WORKING_ENDPOINT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveWorkingEndpoint(endpoint: WorkingEndpoint) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(WORKING_ENDPOINT_KEY, JSON.stringify(endpoint));
+  } catch (e) {}
+}
 
 /**
- * Découvre ou sélectionne le modèle Gemini Flash actif pour cette clé API
+ * Découvre dynamiquement les modèles supportés par la clé API auprès de Google
  */
-export async function getActiveGeminiModel(apiKey: string): Promise<string> {
-  if (cachedWorkingModel) return cachedWorkingModel;
-
+async function discoverModelsFromGoogle(
+  apiKey: string,
+  version: 'v1' | 'v1beta'
+): Promise<string[]> {
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`
+      `https://generativelanguage.googleapis.com/${version}/models?key=${apiKey.trim()}`,
+      {
+        headers: {
+          'x-goog-api-key': apiKey.trim(),
+        },
+      }
     );
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.models)) {
-        const availableNames: string[] = data.models
+        return data.models
           .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
           .map((m: any) => m.name.replace(/^models\//, ''));
-
-        for (const candidate of CANDIDATE_MODELS) {
-          const match = availableNames.find((n) => n === candidate || n.startsWith(candidate));
-          if (match) {
-            cachedWorkingModel = match;
-            return match;
-          }
-        }
-
-        const anyFlash = availableNames.find((n) => n.includes('flash'));
-        if (anyFlash) {
-          cachedWorkingModel = anyFlash;
-          return anyFlash;
-        }
-
-        if (availableNames.length > 0) {
-          cachedWorkingModel = availableNames[0];
-          return availableNames[0];
-        }
       }
     }
   } catch (e) {
-    console.warn('Impossible de lister les modèles, utilisation de la liste de secours');
+    console.warn(`Could not list models on ${version}:`, e);
   }
-
-  return 'gemini-2.5-flash';
+  return [];
 }
 
 /**
- * Exécute un appel à Gemini avec basculement automatique sur les modèles compatibles
+ * Exécute un appel direct generateContent sur un endpoint spécifique
+ */
+async function tryGenerateContent(
+  apiKey: string,
+  endpoint: WorkingEndpoint,
+  prompt: string,
+  responseJson: boolean = false
+): Promise<{ text: string; error?: string; status?: number }> {
+  try {
+    const bodyPayload: any = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+      },
+    };
+
+    if (responseJson) {
+      bodyPayload.generationConfig.responseMimeType = 'application/json';
+    }
+
+    const url = `https://generativelanguage.googleapis.com/${endpoint.apiVersion}/models/${endpoint.model}:generateContent?key=${apiKey.trim()}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey.trim(),
+      },
+      body: JSON.stringify(bodyPayload),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        return { text };
+      }
+    }
+
+    const errJson = await res.json().catch(() => ({}));
+    const errMsg = errJson.error?.message || `Erreur API (${res.status})`;
+    return { text: '', error: errMsg, status: res.status };
+  } catch (err: any) {
+    return { text: '', error: err.message || 'Erreur réseau' };
+  }
+}
+
+/**
+ * Diagnostic complet et test de la clé Gemini
+ */
+export async function testGeminiApiKey(apiKey: string): Promise<GeminiTestResult> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) {
+    return { success: false, message: 'Veuillez renseigner une clé API avant de tester.' };
+  }
+
+  const diagnostics: string[] = [];
+
+  // 1. Tenter la découverte de modèles sur v1beta et v1
+  const modelsBeta = await discoverModelsFromGoogle(cleanKey, 'v1beta');
+  const modelsV1 = await discoverModelsFromGoogle(cleanKey, 'v1');
+  const allDiscovered = Array.from(new Set([...modelsBeta, ...modelsV1]));
+
+  if (allDiscovered.length > 0) {
+    diagnostics.push(`Modèles découverts sur votre compte : ${allDiscovered.slice(0, 4).join(', ')}`);
+
+    // Tenter avec le premier modèle découvert
+    for (const m of allDiscovered) {
+      const ver = modelsBeta.includes(m) ? 'v1beta' : 'v1';
+      const testAttempt = await tryGenerateContent(cleanKey, { apiVersion: ver, model: m }, 'Réponds "OK"');
+      if (testAttempt.text) {
+        const ep = { apiVersion: ver, model: m };
+        saveWorkingEndpoint(ep);
+        return {
+          success: true,
+          message: `Succès : Clé validée avec le modèle ${m} (${ver}) ! 🎉`,
+          modelUsed: m,
+          apiVersionUsed: ver,
+          availableModels: allDiscovered,
+          diagnostics,
+        };
+      }
+    }
+  }
+
+  // 2. Tester les combinaisons candidates
+  for (const cand of CANDIDATE_ENDPOINTS) {
+    const res = await tryGenerateContent(cleanKey, cand, 'Réponds "OK"');
+    if (res.text) {
+      saveWorkingEndpoint(cand);
+      return {
+        success: true,
+        message: `Succès : Clé validée avec ${cand.model} (API ${cand.apiVersion}) ! 🎉`,
+        modelUsed: cand.model,
+        apiVersionUsed: cand.apiVersion,
+        diagnostics,
+      };
+    } else {
+      diagnostics.push(`${cand.apiVersion}/${cand.model} : ${res.error || 'échec'}`);
+    }
+  }
+
+  const firstError = diagnostics[0] || 'Aucun modèle compatible trouvé.';
+  return {
+    success: false,
+    message: `Échec du test. ${firstError}`,
+    diagnostics,
+  };
+}
+
+/**
+ * Exécute un appel à Gemini avec le meilleur endpoint validé
  */
 export async function callGeminiApi(
   apiKey: string,
   prompt: string,
   responseJson: boolean = false
-): Promise<{ text: string; modelUsed: string; error?: string }> {
-  const primaryModel = await getActiveGeminiModel(apiKey);
-  const modelsToTry = [
-    primaryModel,
-    ...CANDIDATE_MODELS.filter((m) => m !== primaryModel),
-  ];
+): Promise<{ text: string; error?: string }> {
+  const cleanKey = apiKey.trim();
+  if (!cleanKey) return { text: '', error: 'Clé absente' };
 
-  let lastError = '';
+  // 1. Essayer d'abord le dernier endpoint fonctionnel mémorisé
+  const saved = getSavedWorkingEndpoint();
+  if (saved) {
+    const res = await tryGenerateContent(cleanKey, saved, prompt, responseJson);
+    if (res.text) return { text: res.text };
+  }
 
-  for (const model of modelsToTry) {
-    try {
-      const bodyPayload: any = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-        },
-      };
-
-      if (responseJson) {
-        bodyPayload.generationConfig.responseMimeType = 'application/json';
-      }
-
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(bodyPayload),
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          cachedWorkingModel = model;
-          return { text, modelUsed: model };
-        }
-      } else {
-        const errJson = await res.json().catch(() => ({}));
-        lastError = errJson.error?.message || `Erreur API (${res.status})`;
-        // Si le modèle n'existe pas (404), on essaye le suivant dans la liste
-        if (res.status === 404) {
-          continue;
-        }
-        return { text: '', modelUsed: model, error: lastError };
-      }
-    } catch (err: any) {
-      lastError = err.message || 'Erreur réseau';
+  // 2. Parcourir les candidats en secours
+  for (const cand of CANDIDATE_ENDPOINTS) {
+    const res = await tryGenerateContent(cleanKey, cand, prompt, responseJson);
+    if (res.text) {
+      saveWorkingEndpoint(cand);
+      return { text: res.text };
     }
   }
 
-  return { text: '', modelUsed: '', error: lastError || 'Aucun modèle compatible trouvé.' };
-}
-
-/**
- * Teste la validité de la clé API Gemini
- */
-export async function testGeminiApiKey(
-  apiKey: string
-): Promise<{ success: boolean; message: string; modelUsed?: string }> {
-  if (!apiKey.trim()) {
-    return { success: false, message: 'Veuillez renseigner une clé API avant de tester.' };
-  }
-
-  const { text, modelUsed, error } = await callGeminiApi(
-    apiKey,
-    'Réponds exactement "OK" en un seul mot.'
-  );
-
-  if (text) {
-    return {
-      success: true,
-      message: `Succès : Clé Gemini valide ! (Modèle actif : ${modelUsed}) 🎉`,
-      modelUsed,
-    };
-  }
-
-  return {
-    success: false,
-    message: error || 'Impossible de joindre Gemini avec cette clé.',
-  };
+  return { text: '', error: 'Impossible de contacter l’API Gemini avec cette clé.' };
 }
 
 /**
