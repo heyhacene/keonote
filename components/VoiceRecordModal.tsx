@@ -32,7 +32,6 @@ export function VoiceRecordModal({
   const [transcript, setTranscript] = useState('');
   const [waveformData, setWaveformData] = useState<number[]>([15, 25, 40, 20, 50, 30, 60, 40, 30, 20, 15, 10]);
   const [duration, setDuration] = useState(0);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const recorderRef = useRef<VoiceRecordingManager | null>(null);
@@ -115,44 +114,30 @@ export function VoiceRecordModal({
       timerRef.current = null;
     }
 
-    setIsAnalyzing(true);
     const audioResult = await recorderRef.current.stop();
     setIsRecording(false);
 
-    const textToAnalyze = transcript.trim() || 'Note vocale sans parole détectée.';
-    const apiKey = getGeminiApiKey();
+    const liveText = transcript.trim();
+    const newNote: Note = {
+      id: `note-${Date.now()}`,
+      title: 'Mémo vocal en cours d’analyse...',
+      content: liveText || 'Enregistrement audio capturé. Structuration IA en arrière-plan...',
+      summary: 'L\'IA Gemini écoute et structure votre enregistrement...',
+      todos: [],
+      tags: ['Mémo', 'En traitement'],
+      type: 'voice',
+      audioData: audioResult?.audioDataUrl,
+      audioDurationSec: audioResult?.durationSec || duration,
+      isPinned: false,
+      isArchived: false,
+      color: '#8b5cf6',
+      status: 'processing',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
 
-    try {
-      const aiResult = await analyzeTranscriptWithGemini(textToAnalyze, apiKey);
-
-      const newNote: Note = {
-        id: `note-${Date.now()}`,
-        title: aiResult.title,
-        content: aiResult.cleanContent,
-        summary: aiResult.summary,
-        todos: aiResult.todos.map((t, idx) => ({
-          id: `todo-${Date.now()}-${idx}`,
-          text: t,
-          completed: false,
-        })),
-        tags: aiResult.tags,
-        type: 'voice',
-        audioData: audioResult?.audioDataUrl,
-        audioDurationSec: audioResult?.durationSec || duration,
-        isPinned: false,
-        isArchived: false,
-        color: '#8b5cf6',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      onNoteCreated(newNote);
-      onClose();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Erreur lors de la structuration de la note.');
-    } finally {
-      setIsAnalyzing(false);
-    }
+    onNoteCreated(newNote);
+    onClose();
   };
 
   if (!isOpen) return null;
@@ -299,31 +284,14 @@ export function VoiceRecordModal({
               <button
                 type="button"
                 onClick={handleStopAndAnalyze}
-                disabled={isAnalyzing || duration === 0}
+                disabled={duration === 0}
                 className="flex-1 py-3.5 px-4 bg-gradient-to-r from-keo-600 to-purple-600 hover:from-keo-700 hover:to-purple-700 text-white rounded-2xl text-xs sm:text-sm font-extrabold transition flex items-center justify-center gap-2 shadow-lg shadow-keo-600/30 active:scale-98 disabled:opacity-50"
               >
                 <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>Terminer & Structurer avec l'IA</span>
+                <span>Terminer le mémo vocal</span>
               </button>
             </div>
           </>
-        )}
-
-        {/* ÉTAT 3 : ANALYSE EN COURS */}
-        {isAnalyzing && (
-          <div className="my-10 flex flex-col items-center text-center space-y-4">
-            <div className="w-16 h-16 rounded-full bg-keo-50 dark:bg-slate-900 flex items-center justify-center text-keo-600 dark:text-keo-400 shadow-inner">
-              <Sparkles className="w-8 h-8 animate-spin text-amber-400" />
-            </div>
-            <div>
-              <h4 className="font-extrabold text-sm text-gray-900 dark:text-white">
-                Structuration intelligente en cours...
-              </h4>
-              <p className="text-xs text-gray-400 mt-1 max-w-xs">
-                Gemini extrait le titre, le résumé, vos to-dos et les catégories.
-              </p>
-            </div>
-          </div>
         )}
       </div>
     </div>

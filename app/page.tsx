@@ -17,7 +17,8 @@ import {
   Volume2,
 } from 'lucide-react';
 import { Note, CategoryFilter } from '@/types/note';
-import { loadNotes, saveNotes } from '@/lib/storage';
+import { loadNotes, saveNotes, getGeminiApiKey } from '@/lib/storage';
+import { analyzeVoiceMemoWithGemini } from '@/lib/gemini';
 import { Navbar } from '@/components/Navbar';
 import { NoteCard } from '@/components/NoteCard';
 import { VoiceRecordModal } from '@/components/VoiceRecordModal';
@@ -65,9 +66,79 @@ export default function Home() {
     }
   };
 
+  // Traitement IA en arrière-plan d'une note vocale
+  const handleProcessNoteInBackground = async (noteToProcess: Note) => {
+    try {
+      const apiKey = getGeminiApiKey();
+      const aiResult = await analyzeVoiceMemoWithGemini(
+        noteToProcess.audioData,
+        noteToProcess.content && !noteToProcess.content.startsWith('Enregistrement audio')
+          ? noteToProcess.content
+          : '',
+        apiKey
+      );
+
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === noteToProcess.id
+            ? {
+                ...n,
+                title: aiResult.title || 'Mémo vocal',
+                summary: aiResult.summary || '',
+                content: aiResult.cleanContent || n.content,
+                todos: aiResult.todos.map((t, idx) => ({
+                  id: `todo-${Date.now()}-${idx}`,
+                  text: t,
+                  completed: false,
+                })),
+                tags: aiResult.tags.length > 0 ? aiResult.tags : ['Mémo'],
+                status: 'ready',
+                processingError: undefined,
+                updatedAt: Date.now(),
+              }
+            : n
+        )
+      );
+    } catch (err: any) {
+      console.error('Erreur traitement IA en arrière-plan:', err);
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === noteToProcess.id
+            ? {
+                ...n,
+                status: 'error',
+                processingError:
+                  err?.message ||
+                  'Structuration IA interrompue. Réessayez dans quelques instants.',
+                updatedAt: Date.now(),
+              }
+            : n
+        )
+      );
+    }
+  };
+
   // Gestion des notes
   const handleCreateNote = (newNote: Note) => {
-    setNotes([newNote, ...notes]);
+    setNotes((prev) => [newNote, ...prev]);
+    if (newNote.status === 'processing') {
+      handleProcessNoteInBackground(newNote);
+    }
+  };
+
+  const handleRetryProcessing = (noteToRetry: Note) => {
+    setNotes((prev) =>
+      prev.map((n) =>
+        n.id === noteToRetry.id
+          ? { ...n, status: 'processing', processingError: undefined }
+          : n
+      )
+    );
+    handleProcessNoteInBackground({
+      ...noteToRetry,
+      status: 'processing',
+      processingError: undefined,
+    });
   };
 
   const handleUpdateNote = (updatedNote: Note) => {
@@ -342,6 +413,7 @@ export default function Home() {
                 onDeleteNote={handleDeleteNote}
                 onEditNote={handleOpenEdit}
                 onTagClick={(t) => setSelectedTag(t)}
+                onRetryProcessing={handleRetryProcessing}
               />
             ))}
           </div>

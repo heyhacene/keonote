@@ -19,6 +19,8 @@ export interface Note {
   isPinned: boolean;
   isArchived: boolean;
   color?: string;
+  status?: 'processing' | 'ready' | 'error';
+  processingError?: string;
   createdAt: number;
   updatedAt: number;
 }

@@ -98,18 +98,27 @@ function prioritizeModels(models: string[]): string[] {
   });
 }
 
+export type GeminiContentPart =
+  | { text: string; thought?: boolean }
+  | { inlineData: { mimeType: string; data: string } };
+
 /**
  * Exécute un appel direct generateContent sur un endpoint spécifique
  */
 async function tryGenerateContent(
   apiKey: string,
   endpoint: WorkingEndpoint,
-  prompt: string,
+  promptOrParts: string | GeminiContentPart[],
   responseJson: boolean = false
 ): Promise<{ text: string; error?: string; status?: number }> {
   try {
+    const parts =
+      typeof promptOrParts === 'string'
+        ? [{ text: promptOrParts }]
+        : promptOrParts;
+
     const bodyPayload: any = {
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
       generationConfig: {
         temperature: 0.2,
       },
@@ -133,10 +142,10 @@ async function tryGenerateContent(
     if (res.ok) {
       const data = await res.json();
       const candidate = data?.candidates?.[0];
-      const parts: any[] = candidate?.content?.parts || [];
+      const resParts: any[] = candidate?.content?.parts || [];
       // Filtrer les parties de réflexion interne (thought: true)
-      const nonThoughtParts = parts.filter((p: any) => !p.thought);
-      const usefulParts = nonThoughtParts.length > 0 ? nonThoughtParts : parts;
+      const nonThoughtParts = resParts.filter((p: any) => !p.thought);
+      const usefulParts = nonThoughtParts.length > 0 ? nonThoughtParts : resParts;
       const text = usefulParts
         .map((p: any) => (typeof p.text === 'string' ? p.text : ''))
         .filter(Boolean)
@@ -224,7 +233,7 @@ export async function testGeminiApiKey(apiKey: string): Promise<GeminiTestResult
  */
 export async function callGeminiApi(
   apiKey: string,
-  prompt: string,
+  promptOrParts: string | GeminiContentPart[],
   responseJson: boolean = false
 ): Promise<{ text: string; error?: string }> {
   const cleanKey = apiKey.trim();
@@ -233,18 +242,18 @@ export async function callGeminiApi(
   // 1. Essayer d'abord le dernier endpoint fonctionnel mémorisé
   const saved = getSavedWorkingEndpoint();
   if (saved) {
-    const res = await tryGenerateContent(cleanKey, saved, prompt, responseJson);
+    const res = await tryGenerateContent(cleanKey, saved, promptOrParts, responseJson);
     if (res.text) return { text: res.text };
 
     // Tentative de rattrapage après 800ms
     await new Promise((r) => setTimeout(r, 800));
-    const retry = await tryGenerateContent(cleanKey, saved, prompt, responseJson);
+    const retry = await tryGenerateContent(cleanKey, saved, promptOrParts, responseJson);
     if (retry.text) return { text: retry.text };
   }
 
   // 2. Parcourir les candidats en secours
   for (const cand of CANDIDATE_ENDPOINTS) {
-    const res = await tryGenerateContent(cleanKey, cand, prompt, responseJson);
+    const res = await tryGenerateContent(cleanKey, cand, promptOrParts, responseJson);
     if (res.text) {
       saveWorkingEndpoint(cand);
       return { text: res.text };
@@ -255,55 +264,93 @@ export async function callGeminiApi(
 }
 
 /**
- * Analyse et structure une transcription avec Gemini
+ * Analyse et structure un mémo vocal avec Gemini (écoute directe de l'audio si présent)
+ */
+export async function analyzeVoiceMemoWithGemini(
+  audioDataUrl: string | undefined,
+  liveTranscript: string,
+  apiKey: string
+): Promise<GeminiStructureResult> {
+  if (!apiKey.trim()) {
+    return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+  }
+
+  let audioPart: GeminiContentPart | null = null;
+  if (audioDataUrl && audioDataUrl.includes('base64,')) {
+    const [header, base64Data] = audioDataUrl.split(';base64,');
+    let mime = header.replace(/^data:/, '').split(';')[0] || 'audio/webm';
+    if (mime.includes('webm')) mime = 'audio/webm';
+    else if (mime.includes('mp4')) mime = 'audio/mp4';
+    else if (mime.includes('ogg')) mime = 'audio/ogg';
+    else if (mime.includes('wav')) mime = 'audio/wav';
+    else if (mime.includes('aac')) mime = 'audio/aac';
+
+    if (base64Data && base64Data.length > 50) {
+      audioPart = {
+        inlineData: {
+          mimeType: mime,
+          data: base64Data,
+        },
+      };
+    }
+  }
+
+  const promptText = `Tu es l'assistant d'un carnet de notes personnel intelligent nommé "Keo Note".
+L'utilisateur vient d'enregistrer un mémo vocal.
+${audioPart ? "Écoute attentivement l'enregistrement audio vocal ci-joint en français et transcris avec exactitude tout ce que l'utilisateur a prononcé." : ""}
+${liveTranscript && liveTranscript.trim() ? `Transcription de référence : """${liveTranscript}"""` : ""}
+
+Analyse et structure ce mémo vocal en renvoyant STRICTEMENT un objet JSON (sans balises markdown supplémentaires) ayant exactement ce schéma :
+{
+  "title": "Un titre court et percutant en français (3 à 6 mots maximum)",
+  "summary": "Un résumé clair et synthétique en français (1 ou 2 phrases)",
+  "cleanContent": "L'intégralité du texte retranscrit et corrigé avec une ponctuation soignée",
+  "todos": ["Action concrète 1 à faire", "Action concrète 2 à faire"],
+  "tags": ["Courses", "Maison", "Travail"]
+}
+
+Règles impératives :
+- Transcris fidèlement la voix de l'utilisateur dans "cleanContent". S'il n'y a absolument aucune voix audible ou seulement du silence, indique "Mémo vocal sans parole détectée".
+- Si le mémo contient des actions ou des tâches à faire, liste-les dans le tableau "todos". Sinon, laisse le tableau "todos" vide [].
+- "tags" doit contenir entre 1 et 3 catégories courtes en français (ex: Maison, Famille, Courses, Auto, Travail, Santé, Idée, Finances, Rendez-vous).
+- Réponds UNIQUEMENT le JSON valide.`;
+
+  const parts: GeminiContentPart[] = [];
+  if (audioPart) {
+    parts.push(audioPart);
+  }
+  parts.push({ text: promptText });
+
+  try {
+    const { text, error } = await callGeminiApi(apiKey, parts, true);
+    if (!text || error) {
+      console.warn('Gemini audio call failed:', error);
+      return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+    }
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+    return {
+      title: parsed.title || 'Mémo vocal',
+      summary: parsed.summary || 'Mémo vocal enregistré',
+      cleanContent: parsed.cleanContent || liveTranscript || 'Mémo vocal enregistré',
+      todos: Array.isArray(parsed.todos) ? parsed.todos : [],
+      tags: Array.isArray(parsed.tags) && parsed.tags.length > 0 ? parsed.tags : ['Mémo'],
+    };
+  } catch (err) {
+    console.warn('Erreur JSON ou appel Gemini audio:', err);
+    return fallbackStructure(liveTranscript || 'Mémo vocal enregistré');
+  }
+}
+
+/**
+ * Analyse et structure une transcription avec Gemini (rétrocompatibilité)
  */
 export async function analyzeTranscriptWithGemini(
   transcript: string,
   apiKey: string
 ): Promise<GeminiStructureResult> {
-  if (!apiKey.trim()) {
-    return fallbackStructure(transcript);
-  }
-
-  const prompt = `Tu es l'assistant d'un carnet de notes personnel intelligent nommé "Keo Note".
-L'utilisateur vient de dicter un mémo vocal. Voici la transcription brute :
-"""
-${transcript}
-"""
-
-Analyse cette transcription et renvoie STRICTEMENT un objet JSON (sans balises markdown supplémentaires) ayant exactement ce schéma :
-{
-  "title": "Un titre court et percutant en français (3 à 6 mots maximum)",
-  "summary": "Un résumé clair et synthétique en français (1 ou 2 phrases)",
-  "cleanContent": "Le texte retranscrit et corrigé avec une ponctuation et des paragraphes soignés",
-  "todos": ["Action concrète 1 à faire", "Action concrète 2 à faire"],
-  "tags": ["Courses", "Maison", "Travail"]
-}
-
-Règles :
-- Si la note ne contient pas d'actions précises à faire, laisse le tableau "todos" vide.
-- "tags" doit contenir entre 1 et 3 catégories courtes en français (ex: Maison, Famille, Courses, Auto, Travail, Santé, Idée, Finances, Rendez-vous).
-- Réponds UNIQUEMENT le JSON valide.`;
-
-  try {
-    const { text, error } = await callGeminiApi(apiKey, prompt, true);
-    if (!text || error) {
-      console.warn('Gemini call failed, fallback used:', error);
-      return fallbackStructure(transcript);
-    }
-
-    const parsed = JSON.parse(text);
-    return {
-      title: parsed.title || 'Mémo vocal',
-      summary: parsed.summary || transcript.slice(0, 80) + '...',
-      cleanContent: parsed.cleanContent || transcript,
-      todos: Array.isArray(parsed.todos) ? parsed.todos : [],
-      tags: Array.isArray(parsed.tags) ? parsed.tags : ['Mémo'],
-    };
-  } catch (err) {
-    console.warn('Erreur JSON ou appel Gemini:', err);
-    return fallbackStructure(transcript);
-  }
+  return analyzeVoiceMemoWithGemini(undefined, transcript, apiKey);
 }
 
 /**

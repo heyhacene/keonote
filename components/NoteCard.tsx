@@ -27,6 +27,7 @@ interface NoteCardProps {
   onDeleteNote: (noteId: string) => void;
   onEditNote: (note: Note) => void;
   onTagClick: (tag: string) => void;
+  onRetryProcessing?: (note: Note) => void;
 }
 
 export function NoteCard({
@@ -37,6 +38,7 @@ export function NoteCard({
   onDeleteNote,
   onEditNote,
   onTagClick,
+  onRetryProcessing,
 }: NoteCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -67,7 +69,9 @@ export function NoteCard({
     <div
       onClick={() => onEditNote(note)}
       className={`group relative bg-white dark:bg-slate-800 rounded-3xl p-4 sm:p-5 border transition-all duration-200 hover:shadow-lg cursor-pointer flex flex-col justify-between ${
-        note.isPinned
+        note.status === 'processing'
+          ? 'border-purple-300 dark:border-purple-700 ring-2 ring-purple-400/20 shadow-md'
+          : note.isPinned
           ? 'border-keo-400/80 dark:border-keo-600/80 shadow-sm shadow-keo-500/10'
           : 'border-gray-200/70 dark:border-slate-700/80 hover:border-keo-300 dark:hover:border-slate-600'
       }`}
@@ -166,6 +170,42 @@ export function NoteCard({
             </div>
           </div>
         </div>
+
+        {/* BANNIÈRE DE TRAITEMENT IA EN ARRIÈRE-PLAN */}
+        {note.status === 'processing' && (
+          <div className="mb-3 p-2.5 bg-gradient-to-r from-purple-50/90 via-keo-50/80 to-amber-50/90 dark:from-purple-950/50 dark:via-keo-950/50 dark:to-amber-950/50 border border-purple-200 dark:border-purple-800/60 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400 animate-spin shrink-0" />
+              <span className="text-xs font-bold text-purple-900 dark:text-purple-200 truncate">
+                Structuration IA en cours...
+              </span>
+            </div>
+            <span className="text-[10px] text-purple-600 dark:text-purple-300 font-bold animate-pulse shrink-0 ml-2">
+              En arrière-plan
+            </span>
+          </div>
+        )}
+
+        {/* BANNIÈRE SI ERREUR DE TRAITEMENT */}
+        {note.status === 'error' && (
+          <div className="mb-3 p-2.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-2xl flex items-center justify-between gap-2 text-xs">
+            <span className="text-[11px] font-medium text-red-600 dark:text-red-300 truncate">
+              {note.processingError || "Échec de structuration IA"}
+            </span>
+            {onRetryProcessing && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetryProcessing(note);
+                }}
+                className="px-2 py-1 bg-red-100 hover:bg-red-200 dark:bg-red-900/60 text-red-700 dark:text-red-200 rounded-lg font-bold text-[10px] shrink-0"
+              >
+                Réessayer
+              </button>
+            )}
+          </div>
+        )}
 
         {/* TITRE */}
         <h3 className="font-extrabold text-sm sm:text-base text-gray-900 dark:text-white leading-snug mb-1.5 line-clamp-2">
