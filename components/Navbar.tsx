@@ -38,9 +38,11 @@ export function Navbar({
       <div className="max-w-6xl mx-auto px-3 sm:px-4 h-16 flex items-center justify-between gap-2 sm:gap-3 min-w-0">
         {/* LOGO & NOM */}
         <div className="flex items-center gap-2.5 shrink-0">
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-keo-700 via-keo-600 to-amber-400 text-white flex items-center justify-center shadow-md shadow-keo-600/25 shrink-0">
-            <Mic className="w-5 h-5 text-amber-200" />
-          </div>
+          <img
+            src="/icon.svg"
+            alt="Keo Note Logo"
+            className="w-10 h-10 rounded-2xl shadow-md shadow-keo-600/25 shrink-0 object-contain"
+          />
           <div className="flex items-center gap-2">
             <h1 className="font-extrabold text-base tracking-tight text-gray-900 dark:text-white">
               Keo <span className="text-keo-600 dark:text-keo-400">Note</span>

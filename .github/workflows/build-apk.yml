@@ -55,6 +55,7 @@ jobs:
           mkdir -p android/app/src/main/res/mipmap-xxhdpi
           mkdir -p android/app/src/main/res/mipmap-xxxhdpi
 
+          # Icônes classiques et rondes
           rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
           rsvg-convert -w 72 -h 72 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -65,6 +66,18 @@ jobs:
           rsvg-convert -w 144 -h 144 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
           rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
           rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+
+          # Icônes adaptatives Android 8+ (Foreground) - Remplace le logo bleu Capacitor !
+          rsvg-convert -w 108 -h 108 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png
+          rsvg-convert -w 162 -h 162 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png
+          rsvg-convert -w 216 -h 216 public/icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png
+          rsvg-convert -w 324 -h 324 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png
+          rsvg-convert -w 432 -h 432 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
+
+          # Couleur de fond adaptative assortie à la suite Keo (#090d16)
+          if [ -f "android/app/src/main/res/values/ic_launcher_background.xml" ]; then
+            sed -i 's/#FFFFFF/#090d16/gi' android/app/src/main/res/values/ic_launcher_background.xml
+          fi
 
       - name: Synchronisation Capacitor Android
         run: npx cap sync android
