@@ -8,15 +8,13 @@ interface WorkingEndpoint {
 const WORKING_ENDPOINT_KEY = 'keonote_working_gemini_endpoint';
 
 const CANDIDATE_ENDPOINTS: WorkingEndpoint[] = [
-  { apiVersion: 'v1', model: 'gemini-1.5-flash' },
-  { apiVersion: 'v1beta', model: 'gemini-2.0-flash' },
   { apiVersion: 'v1beta', model: 'gemini-2.5-flash' },
+  { apiVersion: 'v1beta', model: 'gemini-2.0-flash' },
+  { apiVersion: 'v1', model: 'gemini-2.5-flash' },
   { apiVersion: 'v1', model: 'gemini-2.0-flash' },
-  { apiVersion: 'v1beta', model: 'gemini-2.0-flash-exp' },
-  { apiVersion: 'v1beta', model: 'gemini-1.5-flash' },
-  { apiVersion: 'v1beta', model: 'gemini-1.5-flash-latest' },
-  { apiVersion: 'v1', model: 'gemini-1.5-pro' },
-  { apiVersion: 'v1beta', model: 'gemini-1.5-pro' },
+  { apiVersion: 'v1beta', model: 'gemini-2.5-flash-lite' },
+  { apiVersion: 'v1beta', model: 'gemini-2.0-flash-lite' },
+  { apiVersion: 'v1beta', model: 'gemini-2.5-pro' },
 ];
 
 export interface GeminiTestResult {
@@ -32,7 +30,11 @@ function getSavedWorkingEndpoint(): WorkingEndpoint | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(WORKING_ENDPOINT_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Ignorer les anciens modèles 1.5 retirés par Google
+    if (parsed?.model?.includes('1.5')) return null;
+    return parsed;
   } catch (e) {
     return null;
   }
@@ -65,7 +67,16 @@ async function discoverModelsFromGoogle(
       const data = await res.json();
       if (Array.isArray(data.models)) {
         return data.models
-          .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+          .filter(
+            (m: any) =>
+              m.supportedGenerationMethods?.includes('generateContent') &&
+              !m.name.includes('1.5') &&
+              !m.name.includes('vision') &&
+              !m.name.includes('embedding') &&
+              !m.name.includes('imagen') &&
+              !m.name.includes('tts') &&
+              !m.name.includes('aqa')
+          )
           .map((m: any) => m.name.replace(/^models\//, ''));
       }
     }
@@ -76,7 +87,7 @@ async function discoverModelsFromGoogle(
 }
 
 /**
- * Priorise les modèles : favorise les modèles rapides sans mode de réflexion (thinking)
+ * Priorise les modèles : favorise gemini-2.5-flash et gemini-2.0-flash
  */
 function prioritizeModels(models: string[]): string[] {
   return [...models].sort((a, b) => {
@@ -85,13 +96,13 @@ function prioritizeModels(models: string[]): string[] {
     if (aThinking !== bThinking) return aThinking - bThinking;
 
     const getScore = (m: string) => {
+      if (m === 'gemini-2.5-flash') return 110;
       if (m === 'gemini-2.0-flash') return 100;
-      if (m === 'gemini-1.5-flash') return 90;
-      if (m.includes('2.5-flash')) return 80;
-      if (m.includes('2.0-flash')) return 70;
-      if (m.includes('1.5-flash')) return 60;
-      if (m.includes('1.5-pro')) return 50;
-      if (m.includes('2.0-pro')) return 40;
+      if (m.startsWith('gemini-2.5-flash')) return 95;
+      if (m.startsWith('gemini-2.0-flash')) return 90;
+      if (m.includes('2.5-pro')) return 80;
+      if (m.includes('flash')) return 70;
+      if (m.includes('pro')) return 50;
       return 10;
     };
     return getScore(b) - getScore(a);
@@ -101,6 +112,94 @@ function prioritizeModels(models: string[]): string[] {
 export type GeminiContentPart =
   | { text: string; thought?: boolean }
   | { inlineData: { mimeType: string; data: string } };
+
+/**
+ * Convertit n'importe quel DataURL audio (webm/opus, mp4, etc.) en WAV PCM 16-bit 16kHz Mono
+ * Universellement accepté par tous les modèles Gemini (v1 et v1beta) sans erreur de codec !
+ */
+async function convertAudioDataUrlToWavBase64(
+  audioDataUrl: string
+): Promise<{ mimeType: string; data: string } | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const [, base64Raw] = audioDataUrl.split('base64,');
+    if (!base64Raw) return null;
+    const cleanB64 = base64Raw.replace(/\s/g, '');
+    const binaryStr = window.atob(cleanB64);
+    const len = binaryStr.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    const tempCtx = new AudioCtx();
+    const audioBuffer = await tempCtx.decodeAudioData(bytes.buffer.slice(0));
+    try {
+      await tempCtx.close();
+    } catch (_) {}
+
+    // Rééchantillonnage en 16000 Hz Mono (format léger et idéal pour Gemini)
+    const targetSampleRate = 16000;
+    const targetLength = Math.max(1, Math.ceil(audioBuffer.duration * targetSampleRate));
+    const offlineCtx = new OfflineAudioContext(1, targetLength, targetSampleRate);
+    const source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+    const renderedBuffer = await offlineCtx.startRendering();
+
+    const channelData = renderedBuffer.getChannelData(0);
+    const numSamples = channelData.length;
+    const wavBuffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(wavBuffer);
+
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // PCM chunk size
+    view.setUint16(20, 1, true); // PCM format = 1
+    view.setUint16(22, 1, true); // Mono = 1 channel
+    view.setUint32(24, targetSampleRate, true);
+    view.setUint32(28, targetSampleRate * 2, true); // byte rate
+    view.setUint16(32, 2, true); // block align
+    view.setUint16(34, 16, true); // 16-bit
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const s = Math.max(-1, Math.min(1, channelData[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
+
+    const wavBytes = new Uint8Array(wavBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < wavBytes.length; i += chunkSize) {
+      const sub = wavBytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, Array.from(sub));
+    }
+
+    return {
+      mimeType: 'audio/wav',
+      data: window.btoa(binary),
+    };
+  } catch (err) {
+    console.warn('Conversion WAV échouée, utilisation du flux audio brut :', err);
+    return null;
+  }
+}
 
 /**
  * Exécute un appel direct generateContent sur un endpoint spécifique
@@ -124,7 +223,7 @@ async function tryGenerateContent(
       },
     };
 
-    if (responseJson) {
+    if (responseJson && endpoint.apiVersion === 'v1beta') {
       bodyPayload.generationConfig.responseMimeType = 'application/json';
     }
 
@@ -184,7 +283,7 @@ export async function testGeminiApiKey(apiKey: string): Promise<GeminiTestResult
     const prioritized = prioritizeModels(allDiscovered);
     diagnostics.push(`Modèles découverts sur votre compte : ${prioritized.slice(0, 4).join(', ')}`);
 
-    // Tenter avec les modèles dans l'ordre de priorité (flash sans thinking d'abord)
+    // Tenter avec les modèles dans l'ordre de priorité
     for (const m of prioritized) {
       const ver = modelsBeta.includes(m) ? 'v1beta' : 'v1';
       const testAttempt = await tryGenerateContent(cleanKey, { apiVersion: ver, model: m }, 'Réponds "OK"');
@@ -239,15 +338,16 @@ export async function callGeminiApi(
   const cleanKey = apiKey.trim();
   if (!cleanKey) return { text: '', error: 'Clé API Gemini absente. Ajoutez-la dans Paramètres ⚙️.' };
 
-  let lastError = '';
+  let primaryError = '';
 
   // Helper qui tente avec responseJson puis sans responseJson si l'endpoint rejette responseMimeType
   const tryEndpointWithFallback = async (ep: WorkingEndpoint) => {
     const res = await tryGenerateContent(cleanKey, ep, promptOrParts, responseJson);
     if (res.text) return res;
-    if (responseJson && (res.status === 400 || res.status === 404)) {
+    if (responseJson) {
       const resPlain = await tryGenerateContent(cleanKey, ep, promptOrParts, false);
       if (resPlain.text) return resPlain;
+      return resPlain;
     }
     return res;
   };
@@ -257,20 +357,22 @@ export async function callGeminiApi(
   if (saved) {
     const res = await tryEndpointWithFallback(saved);
     if (res.text) return { text: res.text };
-    if (res.error) lastError = `${saved.model}: ${res.error}`;
+    if (res.error && res.status !== 404) {
+      primaryError = `${saved.model}: ${res.error}`;
+    }
 
-    // Tentative de rattrapage après 600ms
-    await new Promise((r) => setTimeout(r, 600));
+    // Tentative de rattrapage après 500ms
+    await new Promise((r) => setTimeout(r, 500));
     const retry = await tryEndpointWithFallback(saved);
     if (retry.text) return { text: retry.text };
   }
 
-  // 2. Découvrir dynamiquement les modèles du compte si les candidats statiques échouent ou d'emblée
+  // 2. Découvrir dynamiquement les modèles du compte
   const modelsBeta = await discoverModelsFromGoogle(cleanKey, 'v1beta');
   const modelsV1 = await discoverModelsFromGoogle(cleanKey, 'v1');
   const allDiscovered = prioritizeModels(Array.from(new Set([...modelsBeta, ...modelsV1])));
 
-  const dynamicEndpoints: WorkingEndpoint[] = allDiscovered.slice(0, 6).map((m) => ({
+  const dynamicEndpoints: WorkingEndpoint[] = allDiscovered.slice(0, 5).map((m) => ({
     apiVersion: modelsBeta.includes(m) ? 'v1beta' : 'v1',
     model: m,
   }));
@@ -288,12 +390,15 @@ export async function callGeminiApi(
       saveWorkingEndpoint(cand);
       return { text: res.text };
     }
-    if (res.error) lastError = `${cand.model}: ${res.error}`;
+    // Mémoriser en priorité une vraie erreur (ex: 400/429) plutôt qu'un 404 de modèle non trouvé
+    if (res.error && (!primaryError || res.status !== 404)) {
+      primaryError = `${cand.model}: ${res.error}`;
+    }
   }
 
   return {
     text: '',
-    error: lastError || 'Impossible de contacter l’API Gemini avec cette clé.',
+    error: primaryError || 'Impossible de contacter l’API Gemini avec cette clé.',
   };
 }
 
@@ -318,7 +423,7 @@ function parseGeminiJson(rawText: string): any {
 }
 
 /**
- * Analyse et structure un mémo vocal avec Gemini (écoute directe de l'audio + transcription)
+ * Analyse et structure un mémo vocal avec Gemini (écoute directe de l'audio WAV + transcription)
  */
 export async function analyzeVoiceMemoWithGemini(
   audioDataUrl: string | undefined,
@@ -336,24 +441,35 @@ export async function analyzeVoiceMemoWithGemini(
 
   let audioPart: GeminiContentPart | null = null;
   if (audioDataUrl && audioDataUrl.includes('base64,')) {
-    const [header, base64Data] = audioDataUrl.split('base64,');
-    const cleanBase64 = base64Data ? base64Data.replace(/\s/g, '') : '';
-    const hLower = header.toLowerCase();
-
-    let mime = 'audio/webm';
-    if (hLower.includes('webm')) mime = 'audio/webm';
-    else if (hLower.includes('mp4') || hLower.includes('m4a') || hLower.includes('aac')) mime = 'audio/mp4';
-    else if (hLower.includes('ogg') || hLower.includes('opus')) mime = 'audio/ogg';
-    else if (hLower.includes('wav')) mime = 'audio/wav';
-    else if (hLower.includes('mpeg') || hLower.includes('mp3')) mime = 'audio/mp3';
-
-    if (cleanBase64 && cleanBase64.length > 50) {
+    // 1. Convertir d'abord en WAV PCM 16kHz (universellement supporté par Gemini 2.0/2.5)
+    const wavConverted = await convertAudioDataUrlToWavBase64(audioDataUrl);
+    if (wavConverted && wavConverted.data.length > 50) {
       audioPart = {
         inlineData: {
-          mimeType: mime,
-          data: cleanBase64,
+          mimeType: wavConverted.mimeType,
+          data: wavConverted.data,
         },
       };
+    } else {
+      // Fallback si décodage Web Audio impossible
+      const [header, base64Data] = audioDataUrl.split('base64,');
+      const cleanBase64 = base64Data ? base64Data.replace(/\s/g, '') : '';
+      const hLower = header.toLowerCase();
+
+      let mime = 'audio/ogg';
+      if (hLower.includes('wav')) mime = 'audio/wav';
+      else if (hLower.includes('mp4') || hLower.includes('m4a') || hLower.includes('aac')) mime = 'audio/aac';
+      else if (hLower.includes('mpeg') || hLower.includes('mp3')) mime = 'audio/mp3';
+      else if (hLower.includes('ogg') || hLower.includes('webm') || hLower.includes('opus')) mime = 'audio/ogg';
+
+      if (cleanBase64 && cleanBase64.length > 50) {
+        audioPart = {
+          inlineData: {
+            mimeType: mime,
+            data: cleanBase64,
+          },
+        };
+      }
     }
   }
 
