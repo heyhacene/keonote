@@ -29,6 +29,7 @@ interface NoteCardProps {
   onTagClick: (tag: string) => void;
   onRetryProcessing?: (note: Note) => void;
   onOpenSettings?: () => void;
+  onShareNote?: (note: Note) => void;
 }
 
 export function NoteCard({
@@ -41,6 +42,7 @@ export function NoteCard({
   onTagClick,
   onRetryProcessing,
   onOpenSettings,
+  onShareNote,
 }: NoteCardProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -102,7 +104,21 @@ export function NoteCard({
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
+            {onShareNote && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onShareNote(note);
+                }}
+                className="p-1.5 rounded-xl text-gray-400 hover:text-keo-600 dark:text-slate-400 dark:hover:text-keo-300 hover:bg-keo-50 dark:hover:bg-slate-700 transition"
+                title="Partager (WhatsApp, SMS, Mail, Keo Family)"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+
             <button
               type="button"
               onClick={(e) => {
@@ -148,6 +164,19 @@ export function NoteCard({
                     >
                       <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                       <span>Retranscrire par IA</span>
+                    </button>
+                  )}
+                  {onShareNote && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowMenu(false);
+                        onShareNote(note);
+                      }}
+                      className="w-full px-3 py-1.5 text-xs text-left font-bold text-orange-600 dark:text-amber-400 hover:bg-orange-50 dark:hover:bg-slate-700 flex items-center gap-2"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Partager / Keo Family</span>
                     </button>
                   )}
                   <button

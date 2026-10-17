@@ -12,6 +12,7 @@ import {
   Square,
   AlertCircle,
   FileText,
+  Share2,
 } from 'lucide-react';
 import { Note, NoteTodoItem } from '@/types/note';
 import { analyzeVoiceMemoWithGemini } from '@/lib/gemini';
@@ -22,6 +23,7 @@ interface NoteEditorModalProps {
   noteToEdit: Note | null;
   onClose: () => void;
   onSaveNote: (note: Note) => void;
+  onShareNote?: (note: Note) => void;
 }
 
 export function NoteEditorModal({
@@ -29,6 +31,7 @@ export function NoteEditorModal({
   noteToEdit,
   onClose,
   onSaveNote,
+  onShareNote,
 }: NoteEditorModalProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -339,22 +342,55 @@ export function NoteEditorModal({
         </div>
 
         {/* FOOTER */}
-        <div className="p-4 border-t border-gray-100 dark:border-slate-700 flex items-center justify-end gap-2 bg-gray-50/50 dark:bg-slate-900/50">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl transition"
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            className="px-5 py-2.5 bg-keo-600 hover:bg-keo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-keo-600/25 active:scale-95"
-          >
-            <Check className="w-4 h-4" />
-            <span>Enregistrer</span>
-          </button>
+        <div className="p-4 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between gap-2 bg-gray-50/50 dark:bg-slate-900/50">
+          <div>
+            {onShareNote && (title.trim() || content.trim()) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const currentObj: Note = {
+                    id: noteToEdit ? noteToEdit.id : `note-${Date.now()}`,
+                    title: title.trim() || 'Sans titre',
+                    content: content.trim(),
+                    summary: summary.trim() || undefined,
+                    todos,
+                    tags: tags.length > 0 ? tags : ['Général'],
+                    type: noteToEdit ? noteToEdit.type : 'text',
+                    audioData: noteToEdit?.audioData,
+                    audioDurationSec: noteToEdit?.audioDurationSec,
+                    isPinned: noteToEdit ? noteToEdit.isPinned : false,
+                    isArchived: noteToEdit ? noteToEdit.isArchived : false,
+                    color: noteToEdit ? noteToEdit.color : '#8b5cf6',
+                    createdAt: noteToEdit ? noteToEdit.createdAt : Date.now(),
+                    updatedAt: Date.now(),
+                  };
+                  onShareNote(currentObj);
+                }}
+                className="px-3.5 py-2 bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/40 dark:hover:bg-orange-950/70 text-orange-600 dark:text-amber-300 border border-orange-200/70 dark:border-orange-800/50 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Partager / Keo Family</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-xl transition"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-5 py-2.5 bg-keo-600 hover:bg-keo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-keo-600/25 active:scale-95"
+            >
+              <Check className="w-4 h-4" />
+              <span>Enregistrer</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -25,6 +25,7 @@ import { VoiceRecordModal } from '@/components/VoiceRecordModal';
 import { NoteEditorModal } from '@/components/NoteEditorModal';
 import { SecondBrainModal } from '@/components/SecondBrainModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { ShareNoteModal } from '@/components/ShareNoteModal';
 
 export default function Home() {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -41,6 +42,7 @@ export default function Home() {
   const [isSecondBrainOpen, setIsSecondBrainOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [noteToEdit, setNoteToEdit] = useState<Note | null>(null);
+  const [noteToShare, setNoteToShare] = useState<Note | null>(null);
 
   // Thème
   const [darkMode, setDarkMode] = useState(true);
@@ -423,6 +425,7 @@ export default function Home() {
                 onTagClick={(t) => setSelectedTag(t)}
                 onRetryProcessing={handleRetryProcessing}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                onShareNote={(n) => setNoteToShare(n)}
               />
             ))}
           </div>
@@ -482,6 +485,16 @@ export default function Home() {
             handleCreateNote(note);
           }
         }}
+        onShareNote={(note) => {
+          setIsEditorModalOpen(false);
+          setNoteToShare(note);
+        }}
+      />
+
+      <ShareNoteModal
+        isOpen={Boolean(noteToShare)}
+        note={noteToShare}
+        onClose={() => setNoteToShare(null)}
       />
 
       <SecondBrainModal
